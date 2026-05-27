@@ -22,6 +22,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -1391,6 +1393,7 @@ fun OnlineStreamCard(
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun OnlineMoviesSection(
     viewModel: MainScreenViewModel,
@@ -1400,13 +1403,30 @@ fun OnlineMoviesSection(
 ) {
     val importedStreams by viewModel.importedStreams.collectAsState()
     
-    val predefinedStreams = remember {
-        listOf(
-            HlsStreamItem("Sintel (Phim hoạt hình HLS)", "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8", isImported = false),
-            HlsStreamItem("Tears of Steel (Khoa học viễn tưởng)", "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8", isImported = false),
-            HlsStreamItem("Big Buck Bunny (Hoạt hình mẫu)", "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8", isImported = false),
-            HlsStreamItem("IPTV Oceans Test (Live stream)", "https://playertest.longtailvideo.com/adaptive/oceans/oceans.m3u8", isImported = false)
-        )
+    val kkMovies by viewModel.kkMovies.collectAsState()
+    val kkIsSearching by viewModel.kkIsSearching.collectAsState()
+    val kkCurrentPage by viewModel.kkCurrentPage.collectAsState()
+    val kkTotalPages by viewModel.kkTotalPages.collectAsState()
+    val kkTotalItems by viewModel.kkTotalItems.collectAsState()
+    val kkMovieSearchQuery by viewModel.kkMovieSearchQuery.collectAsState()
+    
+    val kkSortField by viewModel.kkSortField.collectAsState()
+    val kkSortType by viewModel.kkSortType.collectAsState()
+    val kkSortLang by viewModel.kkSortLang.collectAsState()
+    val kkCategory by viewModel.kkCategory.collectAsState()
+    val kkCountry by viewModel.kkCountry.collectAsState()
+    val kkYear by viewModel.kkYear.collectAsState()
+    val kkLimit by viewModel.kkLimit.collectAsState()
+
+    val selectedMovieDetail by viewModel.kkSelectedMovieDetail.collectAsState()
+    val isLoadingDetail by viewModel.kkIsLoadingDetail.collectAsState()
+
+    var showFilters by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (kkMovies.isEmpty()) {
+            viewModel.fetchLatestKkMovies(1)
+        }
     }
 
     val txtImportLauncher = rememberLauncherForActivityResult(
@@ -1492,39 +1512,307 @@ fun OnlineMoviesSection(
                         url = item.url,
                         isImported = true,
                         onClick = {
-                            val allStreams = (importedStreams + predefinedStreams).map {
+                            val allStreams = importedStreams.map {
                                 VideoPlaylistItem(it.title, it.url, isOnline = true)
                             }
                             viewModel.setActivePlaylist(allStreams)
-                            onNavigate(Player(videoPath = item.url, videoTitle = item.title, isOnline = true))
+                            onNavigate(com.example.mediaplayer.Player(videoPath = item.url, videoTitle = item.title, isOnline = true))
                         }
                     )
                 }
             }
 
+            // Search and filters Section
             item {
                 Text(
-                    text = "DANH SÁCH PHIM MẪU",
+                    text = "TÌM KIẾM PHIM ONLINE (API KKPHIM)",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 10.dp, bottom = 6.dp)
+                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
                 )
             }
 
-            items(predefinedStreams) { item ->
-                OnlineStreamCard(
-                    title = item.title,
-                    url = item.url,
-                    isImported = false,
-                    onClick = {
-                        val allStreams = (importedStreams + predefinedStreams).map {
-                            VideoPlaylistItem(it.title, it.url, isOnline = true)
+            item {
+                OutlinedTextField(
+                    value = kkMovieSearchQuery,
+                    onValueChange = { viewModel.setKkMovieSearchQuery(it) },
+                    placeholder = { Text("Nhập tên phim...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        IconButton(onClick = { showFilters = !showFilters }) {
+                            Icon(
+                                imageVector = Icons.Default.FilterList,
+                                contentDescription = "Bộ lọc",
+                                tint = if (showFilters) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                        viewModel.setActivePlaylist(allStreams)
-                        onNavigate(Player(videoPath = item.url, videoTitle = item.title, isOnline = true))
-                    }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
                 )
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { viewModel.searchKkMovies(1) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Tìm kiếm", fontSize = 13.sp)
+                    }
+
+                    if (kkMovieSearchQuery.isNotEmpty() || kkCategory.isNotEmpty() || kkCountry.isNotEmpty() || kkYear.isNotEmpty()) {
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.setKkMovieSearchQuery("")
+                                viewModel.kkCategory.value = ""
+                                viewModel.kkCountry.value = ""
+                                viewModel.kkYear.value = ""
+                                viewModel.kkSortField.value = "modified.time"
+                                viewModel.kkSortType.value = "desc"
+                                viewModel.kkSortLang.value = ""
+                                viewModel.fetchLatestKkMovies(1)
+                            },
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Đặt lại", fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+
+            item {
+                AnimatedVisibility(
+                    visible = showFilters,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Bộ lọc nâng cao",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    FilterDropdown(
+                                        label = "Thể loại",
+                                        selectedValue = kkCategory,
+                                        options = CATEGORIES,
+                                        onValueChange = { viewModel.kkCategory.value = it }
+                                    )
+                                }
+                                Box(modifier = Modifier.weight(1f)) {
+                                    FilterDropdown(
+                                        label = "Quốc gia",
+                                        selectedValue = kkCountry,
+                                        options = COUNTRIES,
+                                        onValueChange = { viewModel.kkCountry.value = it }
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    FilterDropdown(
+                                        label = "Sắp xếp",
+                                        selectedValue = kkSortField,
+                                        options = SORT_FIELDS,
+                                        onValueChange = { viewModel.kkSortField.value = it }
+                                    )
+                                }
+                                Box(modifier = Modifier.weight(1f)) {
+                                    FilterDropdown(
+                                        label = "Thứ tự",
+                                        selectedValue = kkSortType,
+                                        options = SORT_TYPES,
+                                        onValueChange = { viewModel.kkSortType.value = it }
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    FilterDropdown(
+                                        label = "Ngôn ngữ",
+                                        selectedValue = kkSortLang,
+                                        options = SORT_LANGS,
+                                        onValueChange = { viewModel.kkSortLang.value = it }
+                                    )
+                                }
+                                Box(modifier = Modifier.weight(1f)) {
+                                    OutlinedTextField(
+                                        value = kkYear,
+                                        onValueChange = { viewModel.kkYear.value = it },
+                                        label = { Text("Năm phát hành", fontSize = 11.sp) },
+                                        placeholder = { Text("2024") },
+                                        shape = RoundedCornerShape(8.dp),
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Results grid or loading indicator
+            if (kkIsSearching) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+            } else if (kkMovies.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Không tìm thấy kết quả nào.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            } else {
+                val movieChunks = kkMovies.chunked(2)
+                items(movieChunks) { rowItems ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        rowItems.forEach { movie ->
+                            Box(modifier = Modifier.weight(1f)) {
+                                KkMovieGridCard(
+                                    movie = movie,
+                                    onClick = {
+                                        viewModel.fetchKkMovieDetail(movie.slug)
+                                    }
+                                )
+                            }
+                        }
+                        if (rowItems.size < 2) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+
+                if (kkTotalPages > 1) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                enabled = kkCurrentPage > 1 && !kkIsSearching,
+                                onClick = {
+                                    val prev = kkCurrentPage - 1
+                                    if (kkMovieSearchQuery.isEmpty()) {
+                                        viewModel.fetchLatestKkMovies(prev)
+                                    } else {
+                                        viewModel.searchKkMovies(prev)
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Trang trước")
+                            }
+
+                            Text(
+                                text = "$kkCurrentPage / $kkTotalPages ($kkTotalItems phim)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            IconButton(
+                                enabled = kkCurrentPage < kkTotalPages && !kkIsSearching,
+                                onClick = {
+                                    val next = kkCurrentPage + 1
+                                    if (kkMovieSearchQuery.isEmpty()) {
+                                        viewModel.fetchLatestKkMovies(next)
+                                    } else {
+                                        viewModel.searchKkMovies(next)
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Trang sau")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Detail Episode Dialog
+    selectedMovieDetail?.let { detail ->
+        KkMovieEpisodeDialog(
+            detail = detail,
+            onDismiss = { viewModel.clearKkSelectedMovieDetail() },
+            onPlayEpisode = { episode ->
+                val playlistItem = VideoPlaylistItem(
+                    title = "${detail.movie?.name} - ${episode.name}",
+                    path = episode.link_m3u8,
+                    isOnline = true
+                )
+                viewModel.setActivePlaylist(listOf(playlistItem))
+                onNavigate(com.example.mediaplayer.Player(videoPath = episode.link_m3u8, videoTitle = "${detail.movie?.name} - ${episode.name}", isOnline = true))
+            }
+        )
+    }
+
+    // Resolving details indicator
+    if (isLoadingDetail) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f))
+                .clickable(enabled = false) {},
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator()
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Đang tải chi tiết phim...", fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -1555,4 +1843,323 @@ fun parseImportedText(text: String): List<HlsStreamItem> {
         }
     }
     return streams
+}
+
+val CATEGORIES = listOf(
+    "" to "Tất cả thể loại",
+    "hanh-dong" to "Hành động",
+    "co-trang" to "Cổ trang",
+    "chien-tranh" to "Chiến tranh",
+    "vien-tuong" to "Viễn tưởng",
+    "kinh-di" to "Kinh dị",
+    "tai-lieu" to "Tài liệu",
+    "hai-huoc" to "Hài hước",
+    "tinh-cam" to "Tình cảm",
+    "tam-ly" to "Tâm lý",
+    "the-thao" to "Thể thao",
+    "hinh-su" to "Hình sự",
+    "am-nhac" to "Âm nhạc",
+    "phieu-luu" to "Phiêu lưu",
+    "gia-dinh" to "Gia đình",
+    "than-thoai" to "Thần thoại"
+)
+
+val COUNTRIES = listOf(
+    "" to "Tất cả quốc gia",
+    "trung-quoc" to "Trung Quốc",
+    "han-quoc" to "Hàn Quốc",
+    "au-my" to "Âu Mỹ",
+    "nhat-ban" to "Nhật Bản",
+    "viet-nam" to "Việt Nam",
+    "thai-lan" to "Thái Lan",
+    "an-do" to "Ấn Độ",
+    "hong-kong" to "Hồng Kông",
+    "dai-loan" to "Đài Loan"
+)
+
+val SORT_FIELDS = listOf(
+    "modified.time" to "Mới cập nhật",
+    "_id" to "Theo ID",
+    "year" to "Năm phát hành"
+)
+
+val SORT_TYPES = listOf(
+    "desc" to "Giảm dần",
+    "asc" to "Tăng dần"
+)
+
+val SORT_LANGS = listOf(
+    "" to "Mọi ngôn ngữ",
+    "vietsub" to "Vietsub",
+    "thuyet-minh" to "Thuyết Minh",
+    "long-tieng" to "Lồng Tiếng"
+)
+
+@Composable
+fun FilterDropdown(
+    label: String,
+    selectedValue: String,
+    options: List<Pair<String, String>>,
+    onValueChange: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val displayLabel = options.firstOrNull { it.first == selectedValue }?.second ?: selectedValue
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedCard(
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(text = displayLabel, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                }
+                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth(0.9f)
+        ) {
+            options.forEach { (valStr, labelStr) ->
+                DropdownMenuItem(
+                    text = { Text(labelStr) },
+                    onClick = {
+                        onValueChange(valStr)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun KkMovieGridCard(
+    movie: KkMovie,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(0.7f)
+                    .background(Color.DarkGray)
+            ) {
+                AsyncImage(
+                    model = movie.posterUrl.ifBlank { movie.thumbUrl },
+                    contentDescription = movie.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                
+                // Badges
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp),
+                    contentAlignment = Alignment.TopStart
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (movie.quality.isNotBlank() && movie.quality != "N/A") {
+                            Badge(containerColor = MaterialTheme.colorScheme.primary) {
+                                Text(text = movie.quality, color = Color.White, fontSize = 9.sp)
+                            }
+                        }
+                        if (movie.lang.isNotBlank() && movie.lang != "N/A") {
+                            Badge(containerColor = MaterialTheme.colorScheme.secondary) {
+                                Text(text = movie.lang, color = Color.White, fontSize = 9.sp)
+                            }
+                        }
+                    }
+                }
+
+                // Episode Current Badge
+                if (movie.episodeCurrent.isNotBlank() && movie.episodeCurrent != "N/A") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(8.dp),
+                        contentAlignment = Alignment.BottomEnd
+                    ) {
+                        Badge(containerColor = Color.Black.copy(alpha = 0.6f)) {
+                            Text(text = movie.episodeCurrent, color = Color.White, fontSize = 9.sp)
+                        }
+                    }
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = movie.name,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${movie.originName} (${movie.year})",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun KkMovieEpisodeDialog(
+    detail: PhimApiDetailResponse,
+    onDismiss: () -> Unit,
+    onPlayEpisode: (PhimApiEpisodeData) -> Unit
+) {
+    val movie = detail.movie ?: return
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = movie.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Black
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    AsyncImage(
+                        model = movie.poster_url ?: movie.thumb_url,
+                        contentDescription = movie.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(width = 100.dp, height = 145.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.DarkGray)
+                    )
+                    
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "Tên gốc: ${movie.origin_name}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "Năm: ${movie.year} | Chất lượng: ${movie.quality}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            text = "Ngôn ngữ: ${movie.lang}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            text = "Thể loại: ${movie.category?.joinToString { it.name } ?: "N/A"}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            text = "Quốc gia: ${movie.country?.joinToString { it.name } ?: "N/A"}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+
+                movie.content?.let { content ->
+                    if (content.isNotBlank()) {
+                        Text(
+                            text = "Nội dung phim",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = content,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                if (detail.episodes.isEmpty()) {
+                    Text(
+                        text = "Không tìm thấy nguồn phát trực tiếp nào.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                } else {
+                    detail.episodes.forEach { server ->
+                        Text(
+                            text = "Nguồn: ${server.server_name}",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                        
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            server.server_data.forEach { ep ->
+                                Button(
+                                    onClick = { onPlayEpisode(ep) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = ep.name,
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = "Đóng")
+            }
+        }
+    )
 }

@@ -31,10 +31,145 @@ data class VideoPlaylistItem(
     val isOnline: Boolean
 )
 
+@Serializable
+data class PhimApiPagination(
+    val totalItems: Int = 0,
+    val totalItemsPerPage: Int = 10,
+    val currentPage: Int = 1,
+    val totalPages: Int = 1
+)
+
+@Serializable
+data class PhimApiParam(
+    val sortField: String = "",
+    val sortType: String = "",
+    val pagination: PhimApiPagination = PhimApiPagination()
+)
+
+@Serializable
+data class PhimApiCategory(
+    val id: String = "",
+    val name: String = "",
+    val slug: String = ""
+)
+
+@Serializable
+data class PhimApiCountry(
+    val id: String = "",
+    val name: String = "",
+    val slug: String = ""
+)
+
+@Serializable
+data class PhimApiMovieItem(
+    val _id: String,
+    val name: String,
+    val slug: String,
+    val origin_name: String,
+    val poster_url: String = "",
+    val thumb_url: String = "",
+    val year: Int = 0,
+    val lang: String = "",
+    val quality: String = "",
+    val episode_current: String = "",
+    val category: List<PhimApiCategory> = emptyList(),
+    val country: List<PhimApiCountry> = emptyList()
+)
+
+@Serializable
+data class PhimApiData(
+    val items: List<PhimApiMovieItem> = emptyList(),
+    val params: PhimApiParam = PhimApiParam(),
+    val APP_DOMAIN_CDN_IMAGE: String = "https://phimimg.com"
+)
+
+@Serializable
+data class PhimApiSearchResponse(
+    val status: String = "",
+    val msg: String = "",
+    val data: PhimApiData = PhimApiData()
+)
+
+@Serializable
+data class PhimNewMovieItem(
+    val _id: String,
+    val name: String,
+    val slug: String,
+    val origin_name: String,
+    val poster_url: String = "",
+    val thumb_url: String = "",
+    val year: Int = 0
+)
+
+@Serializable
+data class PhimNewResponse(
+    val status: Boolean = false,
+    val msg: String = "",
+    val items: List<PhimNewMovieItem> = emptyList(),
+    val pagination: PhimApiPagination? = null
+)
+
+@Serializable
+data class PhimApiDetailMovie(
+    val _id: String,
+    val name: String,
+    val slug: String,
+    val origin_name: String,
+    val content: String? = "",
+    val poster_url: String? = "",
+    val thumb_url: String? = "",
+    val year: Int? = 0,
+    val lang: String? = "",
+    val quality: String? = "",
+    val episode_current: String? = "",
+    val episode_total: String? = "",
+    val actor: List<String>? = emptyList(),
+    val director: List<String>? = emptyList(),
+    val category: List<PhimApiCategory>? = emptyList(),
+    val country: List<PhimApiCountry>? = emptyList()
+)
+
+@Serializable
+data class PhimApiEpisodeData(
+    val name: String,
+    val slug: String,
+    val filename: String = "",
+    val link_embed: String = "",
+    val link_m3u8: String = ""
+)
+
+@Serializable
+data class PhimApiEpisodeServer(
+    val server_name: String = "",
+    val server_data: List<PhimApiEpisodeData> = emptyList()
+)
+
+@Serializable
+data class PhimApiDetailResponse(
+    val status: Boolean = false,
+    val msg: String = "",
+    val movie: PhimApiDetailMovie? = null,
+    val episodes: List<PhimApiEpisodeServer> = emptyList()
+)
+
+data class KkMovie(
+    val id: String,
+    val name: String,
+    val slug: String,
+    val originName: String,
+    val posterUrl: String,
+    val thumbUrl: String,
+    val year: Int,
+    val lang: String = "",
+    val quality: String = "",
+    val episodeCurrent: String = ""
+)
+
 enum class SortType { DATE, SIZE, FORMAT }
 enum class SortOrder { ASC, DESC }
 
 class MainScreenViewModel : ViewModel() {
+    private val apiJson = Json { ignoreUnknownKeys = true }
 
     private val _importedStreams = MutableStateFlow<List<HlsStreamItem>>(emptyList())
     val importedStreams: StateFlow<List<HlsStreamItem>> = _importedStreams.asStateFlow()
@@ -45,6 +180,40 @@ class MainScreenViewModel : ViewModel() {
     fun setActivePlaylist(list: List<VideoPlaylistItem>) {
         _activePlaylist.value = list
     }
+
+    // --- PhimAPI (kkphim) states ---
+    private val _kkMovies = MutableStateFlow<List<KkMovie>>(emptyList())
+    val kkMovies: StateFlow<List<KkMovie>> = _kkMovies.asStateFlow()
+
+    private val _kkIsSearching = MutableStateFlow(false)
+    val kkIsSearching: StateFlow<Boolean> = _kkIsSearching.asStateFlow()
+
+    private val _kkCurrentPage = MutableStateFlow(1)
+    val kkCurrentPage: StateFlow<Int> = _kkCurrentPage.asStateFlow()
+
+    private val _kkTotalPages = MutableStateFlow(1)
+    val kkTotalPages: StateFlow<Int> = _kkTotalPages.asStateFlow()
+
+    private val _kkTotalItems = MutableStateFlow(0)
+    val kkTotalItems: StateFlow<Int> = _kkTotalItems.asStateFlow()
+
+    private val _kkSelectedMovieDetail = MutableStateFlow<PhimApiDetailResponse?>(null)
+    val kkSelectedMovieDetail: StateFlow<PhimApiDetailResponse?> = _kkSelectedMovieDetail.asStateFlow()
+
+    private val _kkIsLoadingDetail = MutableStateFlow(false)
+    val kkIsLoadingDetail: StateFlow<Boolean> = _kkIsLoadingDetail.asStateFlow()
+
+    private val _kkMovieSearchQuery = MutableStateFlow("")
+    val kkMovieSearchQuery: StateFlow<String> = _kkMovieSearchQuery.asStateFlow()
+
+    // Advanced filters
+    val kkSortField = MutableStateFlow("modified.time") // modified.time, _id, year
+    val kkSortType = MutableStateFlow("desc") // desc, asc
+    val kkSortLang = MutableStateFlow("") // "", vietsub, thuyet-minh, long-tieng
+    val kkCategory = MutableStateFlow("")
+    val kkCountry = MutableStateFlow("")
+    val kkYear = MutableStateFlow("")
+    val kkLimit = MutableStateFlow(20)
 
     fun loadImportedStreams(context: Context) {
         val prefs = context.getSharedPreferences("media_player_prefs", Context.MODE_PRIVATE)
@@ -302,6 +471,159 @@ class MainScreenViewModel : ViewModel() {
             folders[video.folderName] = folders.getOrDefault(video.folderName, 0) + 1
         }
         return folders
+    }
+
+    fun setKkMovieSearchQuery(query: String) {
+        _kkMovieSearchQuery.value = query
+    }
+
+    fun clearKkSelectedMovieDetail() {
+        _kkSelectedMovieDetail.value = null
+    }
+
+    fun fetchLatestKkMovies(page: Int = 1) {
+        viewModelScope.launch {
+            _kkIsSearching.value = true
+            _kkCurrentPage.value = page
+            try {
+                val client = HttpClientFactory.client
+                val response = client.get("https://phimapi.com/danh-sach/phim-moi-cap-nhat?page=$page")
+                if (response.status == io.ktor.http.HttpStatusCode.OK) {
+                    val responseText = response.bodyAsText()
+                    val parsed = apiJson.decodeFromString<PhimNewResponse>(responseText)
+                    if (parsed.status) {
+                        _kkMovies.value = parsed.items.map { item ->
+                            KkMovie(
+                                id = item._id,
+                                name = item.name,
+                                slug = item.slug,
+                                originName = item.origin_name,
+                                posterUrl = item.poster_url,
+                                thumbUrl = item.thumb_url,
+                                year = item.year,
+                                lang = "Full",
+                                quality = "HD",
+                                episodeCurrent = "Full"
+                            )
+                        }
+                        parsed.pagination?.let { pag ->
+                            _kkTotalPages.value = pag.totalPages
+                            _kkTotalItems.value = pag.totalItems
+                        }
+                    } else {
+                        _kkMovies.value = emptyList()
+                    }
+                } else {
+                    _kkMovies.value = emptyList()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _kkMovies.value = emptyList()
+            } finally {
+                _kkIsSearching.value = false
+            }
+        }
+    }
+
+    fun searchKkMovies(page: Int = 1) {
+        val query = _kkMovieSearchQuery.value.trim()
+        if (query.isEmpty()) {
+            fetchLatestKkMovies(page)
+            return
+        }
+        viewModelScope.launch {
+            _kkIsSearching.value = true
+            _kkCurrentPage.value = page
+            try {
+                val client = HttpClientFactory.client
+                val urlBuilder = java.lang.StringBuilder("https://phimapi.com/v1/api/tim-kiem")
+                urlBuilder.append("?keyword=").append(java.net.URLEncoder.encode(query, "UTF-8"))
+                urlBuilder.append("&page=").append(page)
+                urlBuilder.append("&limit=").append(kkLimit.value)
+                
+                if (kkSortField.value.isNotEmpty()) {
+                    urlBuilder.append("&sort_field=").append(kkSortField.value)
+                }
+                if (kkSortType.value.isNotEmpty()) {
+                    urlBuilder.append("&sort_type=").append(kkSortType.value)
+                }
+                if (kkSortLang.value.isNotEmpty()) {
+                    urlBuilder.append("&sort_lang=").append(kkSortLang.value)
+                }
+                if (kkCategory.value.isNotEmpty()) {
+                    urlBuilder.append("&category=").append(kkCategory.value)
+                }
+                if (kkCountry.value.isNotEmpty()) {
+                    urlBuilder.append("&country=").append(kkCountry.value)
+                }
+                if (kkYear.value.isNotEmpty()) {
+                    urlBuilder.append("&year=").append(kkYear.value)
+                }
+                
+                val response = client.get(urlBuilder.toString())
+                if (response.status == io.ktor.http.HttpStatusCode.OK) {
+                    val responseText = response.bodyAsText()
+                    val parsed = apiJson.decodeFromString<PhimApiSearchResponse>(responseText)
+                    if (parsed.status == "success") {
+                        val cdn = parsed.data.APP_DOMAIN_CDN_IMAGE
+                        _kkMovies.value = parsed.data.items.map { item ->
+                            val absolutePosterUrl = if (item.poster_url.startsWith("http")) item.poster_url else "$cdn/${item.poster_url}"
+                            val absoluteThumbUrl = if (item.thumb_url.startsWith("http")) item.thumb_url else "$cdn/${item.thumb_url}"
+                            KkMovie(
+                                id = item._id,
+                                name = item.name,
+                                slug = item.slug,
+                                originName = item.origin_name,
+                                posterUrl = absolutePosterUrl,
+                                thumbUrl = absoluteThumbUrl,
+                                year = item.year,
+                                lang = item.lang,
+                                quality = item.quality,
+                                episodeCurrent = item.episode_current
+                            )
+                        }
+                        _kkTotalPages.value = parsed.data.params.pagination.totalPages
+                        _kkTotalItems.value = parsed.data.params.pagination.totalItems
+                    } else {
+                        _kkMovies.value = emptyList()
+                    }
+                } else {
+                    _kkMovies.value = emptyList()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _kkMovies.value = emptyList()
+            } finally {
+                _kkIsSearching.value = false
+            }
+        }
+    }
+
+    fun fetchKkMovieDetail(slug: String, onComplete: (PhimApiDetailResponse?) -> Unit = {}) {
+        viewModelScope.launch {
+            _kkIsLoadingDetail.value = true
+            try {
+                val client = HttpClientFactory.client
+                val response = client.get("https://phimapi.com/phim/$slug")
+                if (response.status == io.ktor.http.HttpStatusCode.OK) {
+                    val responseText = response.bodyAsText()
+                    val parsed = apiJson.decodeFromString<PhimApiDetailResponse>(responseText)
+                    if (parsed.status) {
+                        _kkSelectedMovieDetail.value = parsed
+                        onComplete(parsed)
+                    } else {
+                        onComplete(null)
+                    }
+                } else {
+                    onComplete(null)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onComplete(null)
+            } finally {
+                _kkIsLoadingDetail.value = false
+            }
+        }
     }
 }
 
