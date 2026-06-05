@@ -66,6 +66,7 @@ import com.example.mediaplayer.data.MusicPlayerManager
 import com.example.mediaplayer.data.NctSong
 import com.example.mediaplayer.data.VideoItem
 import com.example.mediaplayer.data.VideoScanner
+import com.example.mediaplayer.data.AdultScrapers
 import com.example.mediaplayer.theme.Loc
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -183,59 +184,6 @@ fun MainScreen(
         }
     }
 
-    // --- Persisted BackgroundPlayWebView for YouTube ---
-    val webView = remember {
-        BackgroundPlayWebView(context).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            settings.databaseEnabled = true
-            settings.cacheMode = WebSettings.LOAD_DEFAULT
-            settings.userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-            
-            webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    // Auto block ads and bypass overlays, and mock Page Visibility API
-                    view?.evaluateJavascript(
-                        """
-                        (function() {
-                          Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
-                          Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
-                          window.addEventListener('visibilitychange', function(e) { e.stopImmediatePropagation(); }, true);
-                          document.addEventListener('visibilitychange', function(e) { e.stopImmediatePropagation(); }, true);
-
-                          var style = document.createElement('style');
-                          style.type = 'text/css';
-                          style.innerHTML = '.video-ads, .ytp-ad-module, .ytp-ad-overlay-container, .promoted-sparkles-text-search-root, ytd-promoted-sparkles-web-renderer { display: none !important; }';
-                          document.head.appendChild(style);
-
-                          setInterval(function() {
-                            var skipButton = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-ad-skip-button-slot');
-                            if (skipButton) {
-                              skipButton.click();
-                              console.log('Ad skipped by Premium Player!');
-                            }
-                            var video = document.querySelector('video');
-                            if (video && document.querySelector('.ad-showing')) {
-                              video.playbackRate = 16.0;
-                              video.muted = true;
-                            }
-                          }, 500);
-                        })();
-                        """.trimIndent(),
-                        null
-                    )
-                }
-            }
-            loadUrl("https://m.youtube.com")
-        }
-    }
-
     // States for Video view
     val isVideoLoading by viewModel.isLoading.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -280,23 +228,6 @@ fun MainScreen(
                             Icon(Icons.Default.Link, contentDescription = Loc.hlsStream, tint = MaterialTheme.colorScheme.primary)
                         }
                     }
-                    if (activeBottomTab == 2) {
-                        // YouTube WebView Navigation
-                        IconButton(
-                            onClick = {
-                                if (webView.canGoBack()) webView.goBack()
-                            }
-                        ) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Trang trước", tint = MaterialTheme.colorScheme.primary)
-                        }
-                        IconButton(
-                            onClick = {
-                                webView.loadUrl("https://m.youtube.com")
-                            }
-                        ) {
-                            Icon(Icons.Default.Home, contentDescription = "YouTube Home", tint = MaterialTheme.colorScheme.primary)
-                        }
-                    }
                     // Settings button
                     IconButton(onClick = { onNavigate(Settings) }) {
                         Icon(Icons.Default.Settings, contentDescription = Loc.settings)
@@ -324,14 +255,14 @@ fun MainScreen(
                 NavigationBarItem(
                     selected = activeBottomTab == 2,
                     onClick = { activeBottomTab = 2 },
-                    icon = { Icon(Icons.Default.PlayCircleOutline, contentDescription = null) },
-                    label = { Text(Loc.youtubeBottomTab) }
+                    icon = { Icon(Icons.Default.SensorOccupied, contentDescription = null) },
+                    label = { Text(Loc.xxnapiBottomTab) }
                 )
                 NavigationBarItem(
                     selected = activeBottomTab == 3,
                     onClick = { activeBottomTab = 3 },
-                    icon = { Icon(Icons.Default.Album, contentDescription = null) },
-                    label = { Text(Loc.djMixerBottomTab) }
+                    icon = { Icon(Icons.Default.SmartDisplay, contentDescription = null) },
+                    label = { Text(Loc.spankbangBottomTab) }
                 )
             }
         }
@@ -386,12 +317,24 @@ fun MainScreen(
                             Tab(
                                 selected = videoFolderTab == 2,
                                 onClick = { videoFolderTab = 2 },
+                                text = { Text(Loc.recentVideosSubTab, fontWeight = FontWeight.Bold) }
+                            )
+                            Tab(
+                                selected = videoFolderTab == 3,
+                                onClick = { videoFolderTab = 3 },
                                 text = { Text(Loc.onlineMoviesTab, fontWeight = FontWeight.Bold) }
                             )
                         }
 
-                        if (videoFolderTab == 2) {
+                        if (videoFolderTab == 3) {
                             OnlineMoviesSection(
+                                viewModel = viewModel,
+                                context = context,
+                                onNavigate = onNavigate,
+                                scope = scope
+                            )
+                        } else if (videoFolderTab == 2) {
+                            RecentVideosSection(
                                 viewModel = viewModel,
                                 context = context,
                                 onNavigate = onNavigate,
@@ -479,6 +422,7 @@ fun MainScreen(
                                                         imageLoader = imageLoader,
                                                         onClick = {
                                                             viewModel.setActivePlaylist(filteredVideos.map { VideoPlaylistItem(it.title, it.path, isOnline = false) })
+                                                            viewModel.addRecentVideo(context, video.title, video.path, false)
                                                             onNavigate(Player(videoPath = video.path, videoTitle = video.title, isOnline = false))
                                                         }
                                                     )
@@ -491,14 +435,15 @@ fun MainScreen(
                                                 modifier = Modifier.fillMaxSize()
                                             ) {
                                                 items(filteredVideos) { video ->
-                                                    VideoListCard(
-                                                        video = video,
-                                                        imageLoader = imageLoader,
-                                                        onClick = {
-                                                            viewModel.setActivePlaylist(filteredVideos.map { VideoPlaylistItem(it.title, it.path, isOnline = false) })
-                                                            onNavigate(Player(videoPath = video.path, videoTitle = video.title, isOnline = false))
-                                                        }
-                                                    )
+                                                     VideoListCard(
+                                                         video = video,
+                                                         imageLoader = imageLoader,
+                                                         onClick = {
+                                                             viewModel.setActivePlaylist(filteredVideos.map { VideoPlaylistItem(it.title, it.path, isOnline = false) })
+                                                             viewModel.addRecentVideo(context, video.title, video.path, false)
+                                                             onNavigate(Player(videoPath = video.path, videoTitle = video.title, isOnline = false))
+                                                         }
+                                                     )
                                                 }
                                             }
                                         }
@@ -707,37 +652,78 @@ fun MainScreen(
                 }
             }
 
-            // Tab 2: YouTube WebView (Always attached, but hidden to maintain background execution)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(
-                        if (activeBottomTab == 2) {
-                            Modifier.fillMaxSize()
-                        } else {
-                            Modifier.size(1.dp).absoluteOffset(y = (-5000).dp)
+            // Tab 2: XXNAPI (XNXX)
+            if (activeBottomTab == 2) {
+                var isResolvingUrl by remember { mutableStateOf(false) }
+                val xnxxQuery by viewModel.xnxxSearchQuery.collectAsState()
+                val xnxxResults by viewModel.xnxxResults.collectAsState()
+                val isSearching by viewModel.isXnxxSearching.collectAsState()
+                
+                AdultSearchSection(
+                    sourceName = "XXNAPI",
+                    results = xnxxResults,
+                    isSearching = isSearching,
+                    searchQuery = xnxxQuery,
+                    onSearchQueryChange = { viewModel.setXnxxSearchQuery(it) },
+                    onSearchClick = { viewModel.searchXnxx(xnxxQuery) },
+                    onPlayClick = { item ->
+                        scope.launch {
+                            isResolvingUrl = true
+                            val streamUrl = AdultScrapers.getXnxxStreamUrl(item.pageUrl)
+                            isResolvingUrl = false
+                            if (streamUrl.isNotBlank()) {
+                                viewModel.addRecentVideo(context, item.title, streamUrl, true)
+                                onNavigate(com.example.mediaplayer.Player(videoPath = streamUrl, videoTitle = item.title, isOnline = true))
+                            } else {
+                                Toast.makeText(context, "Không thể lấy link phát video!", Toast.LENGTH_SHORT).show()
+                            }
                         }
-                    )
-            ) {
-                AndroidView(
-                    factory = { webView },
-                    update = { view ->
-                        // Keep VISIBLE so Android doesn't pause the WebView thread
-                        view.visibility = android.view.View.VISIBLE
-                    },
-                    modifier = Modifier.fillMaxSize()
+                    }
                 )
+
+                if (isResolvingUrl) {
+                    AdultUrlResolvingOverlay()
+                }
             }
 
-            // Tab 3: Producer DJ Mixer Screen
+            // Tab 3: SpankBang
             if (activeBottomTab == 3) {
-                com.example.mediaplayer.ui.mixer.DjMixerScreen(viewModel = viewModel)
+                var isResolvingUrl by remember { mutableStateOf(false) }
+                val spankQuery by viewModel.spankbangSearchQuery.collectAsState()
+                val spankResults by viewModel.spankbangResults.collectAsState()
+                val isSearching by viewModel.isSpankbangSearching.collectAsState()
+                
+                AdultSearchSection(
+                    sourceName = "SpankBang",
+                    results = spankResults,
+                    isSearching = isSearching,
+                    searchQuery = spankQuery,
+                    onSearchQueryChange = { viewModel.setSpankbangSearchQuery(it) },
+                    onSearchClick = { viewModel.searchSpankbang(spankQuery) },
+                    onPlayClick = { item ->
+                        scope.launch {
+                            isResolvingUrl = true
+                            val streamUrl = AdultScrapers.getSpankbangStreamUrl(item.pageUrl)
+                            isResolvingUrl = false
+                            if (streamUrl.isNotBlank()) {
+                                viewModel.addRecentVideo(context, item.title, streamUrl, true)
+                                onNavigate(com.example.mediaplayer.Player(videoPath = streamUrl, videoTitle = item.title, isOnline = true))
+                            } else {
+                                Toast.makeText(context, "Không thể lấy link phát video!", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                )
+
+                if (isResolvingUrl) {
+                    AdultUrlResolvingOverlay()
+                }
             }
 
             // --- Sticky Music Player Overlay ---
             val currentPlayingSong by MusicPlayerManager.currentSong.collectAsState()
             AnimatedVisibility(
-                visible = currentPlayingSong != null && activeBottomTab != 3,
+                visible = currentPlayingSong != null,
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically(),
                 modifier = Modifier
@@ -822,6 +808,7 @@ fun MainScreen(
                         if (hlsUrl.trim().isNotEmpty()) {
                             val title = if (hlsTitle.trim().isEmpty()) "HLS Stream" else hlsTitle
                             showHlsDialog = false
+                            viewModel.addRecentVideo(context, title, hlsUrl.trim(), true)
                             onNavigate(Player(videoPath = hlsUrl.trim(), videoTitle = title, isOnline = true))
                         } else {
                             Toast.makeText(context, "Vui lòng nhập đường dẫn URL!", Toast.LENGTH_SHORT).show()
@@ -1516,6 +1503,7 @@ fun OnlineMoviesSection(
                                 VideoPlaylistItem(it.title, it.url, isOnline = true)
                             }
                             viewModel.setActivePlaylist(allStreams)
+                            viewModel.addRecentVideo(context, item.title, item.url, true)
                             onNavigate(com.example.mediaplayer.Player(videoPath = item.url, videoTitle = item.title, isOnline = true))
                         }
                     )
@@ -1787,6 +1775,7 @@ fun OnlineMoviesSection(
                     isOnline = true
                 )
                 viewModel.setActivePlaylist(listOf(playlistItem))
+                viewModel.addRecentVideo(context, "${detail.movie?.name} - ${episode.name}", episode.link_m3u8, true)
                 onNavigate(com.example.mediaplayer.Player(videoPath = episode.link_m3u8, videoTitle = "${detail.movie?.name} - ${episode.name}", isOnline = true))
             }
         )
@@ -2162,4 +2151,257 @@ fun KkMovieEpisodeDialog(
             }
         }
     )
+}
+
+@Composable
+fun RecentVideosSection(
+    viewModel: MainScreenViewModel,
+    context: Context,
+    onNavigate: (androidx.navigation3.runtime.NavKey) -> Unit,
+    scope: kotlinx.coroutines.CoroutineScope
+) {
+    val recentVideos by viewModel.recentVideos.collectAsState()
+    
+    LaunchedEffect(Unit) {
+        viewModel.loadRecentVideos(context)
+    }
+    
+    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+        if (recentVideos.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Không có video xem gần đây.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Lịch sử xem (${recentVideos.size})",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                TextButton(onClick = { viewModel.clearRecentVideos(context) }) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Xóa lịch sử", fontSize = 13.sp)
+                }
+            }
+            
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(recentVideos) { item ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onNavigate(Player(videoPath = item.path, videoTitle = item.title, isOnline = item.isOnline))
+                            },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (item.isOnline) Icons.Default.CloudQueue else Icons.Default.Movie,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.title,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = if (item.isOnline) "Nguồn: Trực tuyến" else "Nguồn: Thiết bị",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AdultSearchSection(
+    sourceName: String,
+    results: List<com.example.mediaplayer.data.AdultVideoItem>,
+    isSearching: Boolean,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onSearchClick: () -> Unit,
+    onPlayClick: (com.example.mediaplayer.data.AdultVideoItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxSize().padding(12.dp)) {
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchQueryChange,
+            placeholder = { Text("Tìm video trên $sourceName...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { onSearchQueryChange("") }) {
+                        Icon(Icons.Default.Close, contentDescription = null)
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        )
+        
+        Spacer(modifier = Modifier.height(10.dp))
+        
+        Button(
+            onClick = onSearchClick,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Icon(Icons.Default.Search, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Tìm kiếm $sourceName")
+        }
+        
+        Spacer(modifier = Modifier.height(10.dp))
+        
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = isSearching,
+            onRefresh = onSearchClick,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (results.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isSearching) "Đang tìm kiếm..." else "Nhập từ khóa để tìm video trực tuyến.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(bottom = 80.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(results) { item ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onPlayClick(item) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(width = 100.dp, height = 70.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.Black),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (item.thumbnailUrl.startsWith("http")) {
+                                        AsyncImage(
+                                            model = item.thumbnailUrl,
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.SmartDisplay,
+                                            contentDescription = null,
+                                            tint = Color.White.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(36.dp)
+                                        )
+                                    }
+                                    
+                                    if (item.duration.isNotBlank()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(4.dp)
+                                                .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = item.duration,
+                                                color = Color.White,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                                
+                                Spacer(modifier = Modifier.width(16.dp))
+                                
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = item.title,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Nguồn: ${item.source.uppercase()}",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdultUrlResolvingOverlay() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.6f))
+            .clickable(enabled = false) {},
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.padding(24.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                CircularProgressIndicator()
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Đang giải mã đường dẫn luồng phát trực tuyến...", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
 }

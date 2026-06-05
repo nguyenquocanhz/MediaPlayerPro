@@ -25,6 +25,14 @@ data class HlsStreamItem(
 )
 
 @Serializable
+data class RecentVideoItem(
+    val title: String,
+    val path: String,
+    val timestamp: Long,
+    val isOnline: Boolean
+)
+
+@Serializable
 data class VideoPlaylistItem(
     val title: String,
     val path: String,
@@ -622,6 +630,102 @@ class MainScreenViewModel : ViewModel() {
                 onComplete(null)
             } finally {
                 _kkIsLoadingDetail.value = false
+            }
+        }
+    }
+
+    // --- Recently Watched Videos Feature ---
+    private val _recentVideos = MutableStateFlow<List<RecentVideoItem>>(emptyList())
+    val recentVideos: StateFlow<List<RecentVideoItem>> = _recentVideos.asStateFlow()
+
+    fun loadRecentVideos(context: Context) {
+        val prefs = context.getSharedPreferences("media_player_prefs", Context.MODE_PRIVATE)
+        val json = prefs.getString("recent_videos", null)
+        if (json != null) {
+            try {
+                val list = Json.decodeFromString<List<RecentVideoItem>>(json)
+                _recentVideos.value = list.sortedByDescending { it.timestamp }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun addRecentVideo(context: Context, title: String, path: String, isOnline: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val current = _recentVideos.value.toMutableList()
+            current.removeAll { it.path == path }
+            current.add(0, RecentVideoItem(title, path, System.currentTimeMillis(), isOnline))
+            val limited = current.take(30)
+            _recentVideos.value = limited
+            
+            val prefs = context.getSharedPreferences("media_player_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putString("recent_videos", Json.encodeToString(limited)).apply()
+        }
+    }
+
+    fun clearRecentVideos(context: Context) {
+        _recentVideos.value = emptyList()
+        val prefs = context.getSharedPreferences("media_player_prefs", Context.MODE_PRIVATE)
+        prefs.edit().remove("recent_videos").apply()
+    }
+
+    // --- XXNAPI (XNXX) Feature ---
+    private val _xnxxResults = MutableStateFlow<List<AdultVideoItem>>(emptyList())
+    val xnxxResults: StateFlow<List<AdultVideoItem>> = _xnxxResults.asStateFlow()
+
+    private val _isXnxxSearching = MutableStateFlow(false)
+    val isXnxxSearching: StateFlow<Boolean> = _isXnxxSearching.asStateFlow()
+
+    private val _xnxxSearchQuery = MutableStateFlow("")
+    val xnxxSearchQuery: StateFlow<String> = _xnxxSearchQuery.asStateFlow()
+
+    fun setXnxxSearchQuery(query: String) {
+        _xnxxSearchQuery.value = query
+    }
+
+    fun searchXnxx(query: String) {
+        if (query.isBlank()) return
+        viewModelScope.launch {
+            _isXnxxSearching.value = true
+            try {
+                val results = AdultScrapers.searchXnxx(query)
+                _xnxxResults.value = results
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _xnxxResults.value = emptyList()
+            } finally {
+                _isXnxxSearching.value = false
+            }
+        }
+    }
+
+    // --- SpankBang Feature ---
+    private val _spankbangResults = MutableStateFlow<List<AdultVideoItem>>(emptyList())
+    val spankbangResults: StateFlow<List<AdultVideoItem>> = _spankbangResults.asStateFlow()
+
+    private val _isSpankbangSearching = MutableStateFlow(false)
+    val isSpankbangSearching: StateFlow<Boolean> = _isSpankbangSearching.asStateFlow()
+
+    private val _spankbangSearchQuery = MutableStateFlow("")
+    val spankbangSearchQuery: StateFlow<String> = _spankbangSearchQuery.asStateFlow()
+
+    fun setSpankbangSearchQuery(query: String) {
+        _spankbangSearchQuery.value = query
+    }
+
+    fun searchSpankbang(query: String) {
+        if (query.isBlank()) return
+        viewModelScope.launch {
+            _isSpankbangSearching.value = true
+            try {
+                val results = AdultScrapers.searchSpankbang(query)
+                _spankbangResults.value = results
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _spankbangResults.value = emptyList()
+            } finally {
+                _isSpankbangSearching.value = false
             }
         }
     }
