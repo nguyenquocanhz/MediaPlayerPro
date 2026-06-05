@@ -2425,6 +2425,8 @@ fun XxvnMoviesSection(
     onNavigate: (androidx.navigation3.runtime.NavKey) -> Unit,
     scope: kotlinx.coroutines.CoroutineScope
 ) {
+    var isGridView by remember { mutableStateOf(true) }
+
     Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
         // Search bar
         OutlinedTextField(
@@ -2446,10 +2448,11 @@ fun XxvnMoviesSection(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Search Button and Reset
+        // Search Button, Reset and Toggle view mode
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Button(
                 onClick = { viewModel.searchXxvnMovies(1) },
@@ -2471,6 +2474,13 @@ fun XxvnMoviesSection(
                 ) {
                     Text("Đặt lại", fontSize = 13.sp)
                 }
+            }
+
+            IconButton(onClick = { isGridView = !isGridView }) {
+                Icon(
+                    imageVector = if (isGridView) Icons.Default.List else Icons.Default.GridView,
+                    contentDescription = "Chế độ hiển thị"
+                )
             }
         }
 
@@ -2535,25 +2545,36 @@ fun XxvnMoviesSection(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 80.dp)
                 ) {
-                    val movieChunks = movies.chunked(2)
-                    items(movieChunks) { rowItems ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            rowItems.forEach { movie ->
-                                Box(modifier = Modifier.weight(1f)) {
-                                    XxvnMovieGridCard(
-                                        movie = movie,
-                                        onClick = {
-                                            viewModel.fetchXxvnMovieDetail(movie.slug)
-                                        }
-                                    )
+                    if (isGridView) {
+                        val movieChunks = movies.chunked(2)
+                        items(movieChunks) { rowItems ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                rowItems.forEach { movie ->
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        XxvnMovieGridCard(
+                                            movie = movie,
+                                            onClick = {
+                                                viewModel.fetchXxvnMovieDetail(movie.slug)
+                                            }
+                                        )
+                                    }
+                                }
+                                if (rowItems.size < 2) {
+                                    Spacer(modifier = Modifier.weight(1f))
                                 }
                             }
-                            if (rowItems.size < 2) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
+                        }
+                    } else {
+                        items(movies) { movie ->
+                            XxvnMovieListCard(
+                                movie = movie,
+                                onClick = {
+                                    viewModel.fetchXxvnMovieDetail(movie.slug)
+                                }
+                            )
                         }
                     }
 
@@ -2764,6 +2785,114 @@ fun XxvnMovieGridCard(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun XxvnMovieListCard(
+    movie: com.example.mediaplayer.data.XxvnMovieItem,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(90.dp, 60.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!movie.thumb_url.isNullOrBlank()) {
+                    AsyncImage(
+                        model = movie.thumb_url,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Movie,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.5f),
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+                
+                if (!movie.quality.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = movie.quality,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = movie.name,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val catName = movie.categories.firstOrNull()?.name ?: "Phim"
+                    Text(
+                        text = catName,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    movie.country?.name?.let { ctry ->
+                        Box(
+                            modifier = Modifier
+                                .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = ctry,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                }
+                if (!movie.time.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Thời lượng: ${movie.time}",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    )
                 }
             }
         }

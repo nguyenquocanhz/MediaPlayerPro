@@ -108,11 +108,6 @@ object AdultScrapers {
     private val spankbangStreamDataRegex = Regex("""var\s+stream_data\s*=\s*(\{.*?});""", kotlin.text.RegexOption.DOT_MATCHES_ALL)
     private val urlRegex = Regex("""https?://[^\s"']+\.(?:m3u8|mp4)[^\s"']*""")
 
-    private val searchItemRegex = Regex(
-        """href="[^"]*/phim/([^"]+)".*?>(.*?)</a>.*?class="status"[^>]*>(.*?)</span>.*?class="category type"[^>]*>(.*?)</span>.*?class="region"[^>]*>(.*?)</span>.*?class="time"[^>]*>.*?<font[^>]*>(.*?)</font>""",
-        RegexOption.DOT_MATCHES_ALL
-    )
-
     private suspend fun fetchHtml(urlString: String): String {
         return try {
             val client = HttpClientFactory.client
@@ -183,26 +178,47 @@ object AdultScrapers {
         if (html.isBlank()) return emptyList()
 
         val results = mutableListOf<XxvnMovieItem>()
-        searchItemRegex.findAll(html).forEach { match ->
-            val slug = match.groupValues[1].trim()
-            val name = match.groupValues[2].trim()
-            val status = match.groupValues[3].trim()
-            val categoryName = match.groupValues[4].trim()
-            val countryName = match.groupValues[5].trim()
-            val time = match.groupValues[6].trim()
+        try {
+            val startSearchIndex = html.indexOf("videoContent")
+            if (startSearchIndex != -1) {
+                val endIndex = html.indexOf("</ul>", startSearchIndex)
+                if (endIndex != -1) {
+                    val content = html.substring(startSearchIndex, endIndex)
+                    val items = content.split("<li>")
+                    
+                    val hrefRegex = Regex("""href="[^"]*/phim/([^"]+)"""")
+                    val nameRegex = Regex("""<a[^>]*>([^<]+)</a>""")
+                    val statusRegex = Regex("""class="status"[^>]*>([^<]+)</span>""")
+                    val categoryRegex = Regex("""class="category type"[^>]*>([^<]+)</span>""")
+                    val regionRegex = Regex("""class="region"[^>]*>([^<]+)</span>""")
+                    val timeRegex = Regex("""<font[^>]*>([^<]+)</font>""")
 
-            results.add(
-                XxvnMovieItem(
-                    id = slug,
-                    name = name,
-                    slug = slug,
-                    status = status,
-                    quality = status,
-                    time = time,
-                    categories = listOf(XxvnCategory(name = categoryName, slug = "")),
-                    country = XxvnCountry(name = countryName, slug = "")
-                )
-            )
+                    for (item in items) {
+                        if (item.isBlank() || !item.contains("/phim/")) continue
+                        val slug = hrefRegex.find(item)?.groupValues?.get(1)?.trim() ?: continue
+                        val name = nameRegex.find(item)?.groupValues?.get(1)?.trim() ?: "Phim"
+                        val status = statusRegex.find(item)?.groupValues?.get(1)?.trim() ?: ""
+                        val categoryName = categoryRegex.find(item)?.groupValues?.get(1)?.trim() ?: ""
+                        val countryName = regionRegex.find(item)?.groupValues?.get(1)?.trim() ?: ""
+                        val time = timeRegex.find(item)?.groupValues?.get(1)?.trim() ?: ""
+
+                        results.add(
+                            XxvnMovieItem(
+                                id = slug,
+                                name = name,
+                                slug = slug,
+                                status = status,
+                                quality = status,
+                                time = time,
+                                categories = listOf(XxvnCategory(name = categoryName, slug = "")),
+                                country = XxvnCountry(name = countryName, slug = "")
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
         return results
     }
