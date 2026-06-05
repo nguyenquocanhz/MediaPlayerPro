@@ -213,6 +213,7 @@ fun MainScreen(
     var isPlayerMusicViewVisible by remember { mutableStateOf(false) }
 
     Scaffold(
+        modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
                 title = {
