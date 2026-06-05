@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -652,38 +653,39 @@ fun MainScreen(
                 }
             }
 
-            // Tab 2: XXNAPI (XNXX)
+            // Tab 2: XXNAPI
             if (activeBottomTab == 2) {
-                var isResolvingUrl by remember { mutableStateOf(false) }
-                val xnxxQuery by viewModel.xnxxSearchQuery.collectAsState()
-                val xnxxResults by viewModel.xnxxResults.collectAsState()
-                val isSearching by viewModel.isXnxxSearching.collectAsState()
+                val xxvnMovies by viewModel.xxvnMovies.collectAsState()
+                val xxvnIsSearching by viewModel.xxvnIsSearching.collectAsState()
+                val xxvnCurrentPage by viewModel.xxvnCurrentPage.collectAsState()
+                val xxvnTotalPages by viewModel.xxvnTotalPages.collectAsState()
+                val xxvnTotalItems by viewModel.xxvnTotalItems.collectAsState()
+                val xxvnCategory by viewModel.xxvnCategory.collectAsState()
+                val xxvnSearchQuery by viewModel.xxvnSearchQuery.collectAsState()
+                val xxvnSelectedMovieDetail by viewModel.xxvnSelectedMovieDetail.collectAsState()
+                val xxvnIsLoadingDetail by viewModel.xxvnIsLoadingDetail.collectAsState()
                 
-                AdultSearchSection(
-                    sourceName = "XXNAPI",
-                    results = xnxxResults,
-                    isSearching = isSearching,
-                    searchQuery = xnxxQuery,
-                    onSearchQueryChange = { viewModel.setXnxxSearchQuery(it) },
-                    onSearchClick = { viewModel.searchXnxx(xnxxQuery) },
-                    onPlayClick = { item ->
-                        scope.launch {
-                            isResolvingUrl = true
-                            val streamUrl = AdultScrapers.getXnxxStreamUrl(item.pageUrl)
-                            isResolvingUrl = false
-                            if (streamUrl.isNotBlank()) {
-                                viewModel.addRecentVideo(context, item.title, streamUrl, true)
-                                onNavigate(com.example.mediaplayer.Player(videoPath = streamUrl, videoTitle = item.title, isOnline = true))
-                            } else {
-                                Toast.makeText(context, "Không thể lấy link phát video!", Toast.LENGTH_SHORT).show()
-                            }
-                        }
+                LaunchedEffect(Unit) {
+                    if (xxvnMovies.isEmpty()) {
+                        viewModel.fetchXxvnMovies(1)
                     }
-                )
-
-                if (isResolvingUrl) {
-                    AdultUrlResolvingOverlay()
                 }
+                
+                XxvnMoviesSection(
+                    viewModel = viewModel,
+                    movies = xxvnMovies,
+                    isSearching = xxvnIsSearching,
+                    currentPage = xxvnCurrentPage,
+                    totalPages = xxvnTotalPages,
+                    totalItems = xxvnTotalItems,
+                    activeCategory = xxvnCategory,
+                    searchQuery = xxvnSearchQuery,
+                    selectedMovieDetail = xxvnSelectedMovieDetail,
+                    isLoadingDetail = xxvnIsLoadingDetail,
+                    context = context,
+                    onNavigate = onNavigate,
+                    scope = scope
+                )
             }
 
             // Tab 3: SpankBang
@@ -2404,4 +2406,491 @@ fun AdultUrlResolvingOverlay() {
             }
         }
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+fun XxvnMoviesSection(
+    viewModel: MainScreenViewModel,
+    movies: List<com.example.mediaplayer.data.XxvnMovieItem>,
+    isSearching: Boolean,
+    currentPage: Int,
+    totalPages: Int,
+    totalItems: Int,
+    activeCategory: String,
+    searchQuery: String,
+    selectedMovieDetail: com.example.mediaplayer.data.XxvnMovieDetailResponse?,
+    isLoadingDetail: Boolean,
+    context: Context,
+    onNavigate: (androidx.navigation3.runtime.NavKey) -> Unit,
+    scope: kotlinx.coroutines.CoroutineScope
+) {
+    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+        // Search bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { viewModel.setXxvnSearchQuery(it) },
+            placeholder = { Text("Tìm phim trên XXVN...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { viewModel.setXxvnSearchQuery("") }) {
+                        Icon(Icons.Default.Close, contentDescription = null)
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Search Button and Reset
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = { viewModel.searchXxvnMovies(1) },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Icon(Icons.Default.Search, contentDescription = null)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Tìm kiếm", fontSize = 13.sp)
+            }
+
+            if (searchQuery.isNotEmpty() || activeCategory.isNotEmpty()) {
+                OutlinedButton(
+                    onClick = {
+                        viewModel.setXxvnSearchQuery("")
+                        viewModel.setXxvnCategory("")
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Đặt lại", fontSize = 13.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Category Chips (Horizontal Scrollable)
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+        ) {
+            val categoriesList = listOf(
+                "" to "Mới nhất",
+                "hiep-dam" to "Hiếp dâm",
+                "hentai" to "Hentai",
+                "jav-hd" to "Jav HD",
+                "viet-nam-clip" to "Việt Nam",
+                "chau-au" to "Châu Âu",
+                "trung-quoc" to "Trung Quốc",
+                "han-quoc-18-" to "Hàn Quốc 18+",
+                "khong-che" to "AV Không che",
+                "sexhd" to "Sex HD",
+                "vietsub" to "Vietsub",
+                "xvideos" to "Xvideos",
+                "nhat-ban" to "Nhật Bản",
+                "hoc-sinh" to "Học sinh",
+                "vung-trom" to "Vụng trộm",
+                "tap-the" to "Tập thể",
+                "loan-luan" to "Loạn luân",
+                "pornhub" to "PornHub"
+            )
+            items(categoriesList) { (slug, name) ->
+                val isSelected = activeCategory == slug
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { viewModel.setXxvnCategory(slug) },
+                    label = { Text(name, fontSize = 11.sp) }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Movie List / Grid
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            if (isSearching) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            } else if (movies.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Không tìm thấy kết quả nào.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = 80.dp)
+                ) {
+                    val movieChunks = movies.chunked(2)
+                    items(movieChunks) { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            rowItems.forEach { movie ->
+                                Box(modifier = Modifier.weight(1f)) {
+                                    XxvnMovieGridCard(
+                                        movie = movie,
+                                        onClick = {
+                                            viewModel.fetchXxvnMovieDetail(movie.slug)
+                                        }
+                                    )
+                                }
+                            }
+                            if (rowItems.size < 2) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+
+                    if (totalPages > 1) {
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    enabled = currentPage > 1 && !isSearching,
+                                    onClick = {
+                                        val prev = currentPage - 1
+                                        if (searchQuery.isEmpty()) {
+                                            viewModel.fetchXxvnMovies(prev)
+                                        } else {
+                                            viewModel.searchXxvnMovies(prev)
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Trang trước")
+                                }
+
+                                Text(
+                                    text = "$currentPage / $totalPages" + if (totalItems > 0 && searchQuery.isEmpty()) " ($totalItems phim)" else "",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                IconButton(
+                                    enabled = currentPage < totalPages && !isSearching,
+                                    onClick = {
+                                        val next = currentPage + 1
+                                        if (searchQuery.isEmpty()) {
+                                            viewModel.fetchXxvnMovies(next)
+                                        } else {
+                                            viewModel.searchXxvnMovies(next)
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Trang sau")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Detail Dialog
+    selectedMovieDetail?.let { detail ->
+        XxvnMovieEpisodeDialog(
+            detail = detail,
+            onDismiss = { viewModel.clearXxvnSelectedMovieDetail() },
+            onPlayEpisode = { episode ->
+                scope.launch {
+                    val directUrl = com.example.mediaplayer.data.AdultScrapers.parseDfPlayerUrl(episode.link)
+                    if (directUrl.isNotBlank()) {
+                        viewModel.addRecentVideo(context, "${detail.movie?.name} - ${episode.name}", directUrl, true)
+                        onNavigate(com.example.mediaplayer.Player(videoPath = directUrl, videoTitle = "${detail.movie?.name} - ${episode.name}", isOnline = true))
+                    } else {
+                        Toast.makeText(context, "Không thể phát tập phim này!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
+    }
+
+    if (isLoadingDetail) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f))
+                .clickable(enabled = false) {},
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator()
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Đang tải chi tiết phim...", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun XxvnMovieGridCard(
+    movie: com.example.mediaplayer.data.XxvnMovieItem,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1.5f)
+                    .background(Color.Black)
+            ) {
+                if (!movie.thumb_url.isNullOrBlank()) {
+                    AsyncImage(
+                        model = movie.thumb_url,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Movie,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.5f),
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                }
+                
+                if (!movie.quality.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(6.dp)
+                            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = movie.quality,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (!movie.time.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp)
+                            .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = movie.time,
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Column(modifier = Modifier.padding(8.dp)) {
+                Text(
+                    text = movie.name,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val catName = movie.categories.firstOrNull()?.name ?: "Phim"
+                    Text(
+                        text = catName,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    
+                    movie.country?.name?.let { ctry ->
+                        Box(
+                            modifier = Modifier
+                                .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = ctry,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun XxvnMovieEpisodeDialog(
+    detail: com.example.mediaplayer.data.XxvnMovieDetailResponse,
+    onDismiss: () -> Unit,
+    onPlayEpisode: (com.example.mediaplayer.data.XxvnEpisodeData) -> Unit
+) {
+    val movie = detail.movie ?: return
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = movie.name,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Info Section
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(90.dp, 130.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black)
+                    ) {
+                        if (!movie.thumb_url.isNullOrBlank()) {
+                            AsyncImage(
+                                model = movie.thumb_url,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                    
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (!movie.quality.isNullOrBlank()) {
+                            Text(text = "Chất lượng: ${movie.quality}", fontSize = 12.sp)
+                        }
+                        if (!movie.time.isNullOrBlank()) {
+                            Text(text = "Thời lượng: ${movie.time}", fontSize = 12.sp)
+                        }
+                        movie.country?.name?.let {
+                            Text(text = "Quốc gia: $it", fontSize = 12.sp)
+                        }
+                        if (movie.categories.isNotEmpty()) {
+                            val cats = movie.categories.joinToString { it.name }
+                            Text(text = "Thể loại: $cats", fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                // Story/Description
+                if (!movie.content.isNullOrBlank()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(text = "Nội dung:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text(
+                            text = movie.content,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Servers / Episodes List
+                if (movie.episodes.isNotEmpty()) {
+                    movie.episodes.forEach { server ->
+                        Text(
+                            text = server.server_name,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            server.server_data.forEach { ep ->
+                                Button(
+                                    onClick = { onPlayEpisode(ep) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                                ) {
+                                    Text(text = ep.name, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "Không có tập phim nào khả dụng.",
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Đóng")
+            }
+        }
+    )
 }

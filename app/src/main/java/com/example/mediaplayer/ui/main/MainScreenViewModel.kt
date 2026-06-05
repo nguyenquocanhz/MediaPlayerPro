@@ -729,5 +729,116 @@ class MainScreenViewModel : ViewModel() {
             }
         }
     }
+
+    // --- XXVNAPI.COM Feature ---
+    private val _xxvnMovies = MutableStateFlow<List<XxvnMovieItem>>(emptyList())
+    val xxvnMovies: StateFlow<List<XxvnMovieItem>> = _xxvnMovies.asStateFlow()
+
+    private val _xxvnCurrentPage = MutableStateFlow(1)
+    val xxvnCurrentPage: StateFlow<Int> = _xxvnCurrentPage.asStateFlow()
+
+    private val _xxvnTotalPages = MutableStateFlow(1)
+    val xxvnTotalPages: StateFlow<Int> = _xxvnTotalPages.asStateFlow()
+
+    private val _xxvnTotalItems = MutableStateFlow(0)
+    val xxvnTotalItems: StateFlow<Int> = _xxvnTotalItems.asStateFlow()
+
+    private val _xxvnIsSearching = MutableStateFlow(false)
+    val xxvnIsSearching: StateFlow<Boolean> = _xxvnIsSearching.asStateFlow()
+
+    private val _xxvnCategory = MutableStateFlow("") // empty means latest
+    val xxvnCategory: StateFlow<String> = _xxvnCategory.asStateFlow()
+
+    private val _xxvnSearchQuery = MutableStateFlow("")
+    val xxvnSearchQuery: StateFlow<String> = _xxvnSearchQuery.asStateFlow()
+
+    private val _xxvnSelectedMovieDetail = MutableStateFlow<XxvnMovieDetailResponse?>(null)
+    val xxvnSelectedMovieDetail: StateFlow<XxvnMovieDetailResponse?> = _xxvnSelectedMovieDetail.asStateFlow()
+
+    private val _xxvnIsLoadingDetail = MutableStateFlow(false)
+    val xxvnIsLoadingDetail: StateFlow<Boolean> = _xxvnIsLoadingDetail.asStateFlow()
+
+    fun setXxvnSearchQuery(query: String) {
+        _xxvnSearchQuery.value = query
+    }
+
+    fun setXxvnCategory(categorySlug: String) {
+        _xxvnCategory.value = categorySlug
+        _xxvnSearchQuery.value = "" // Clear search on category change
+        fetchXxvnMovies(1)
+    }
+
+    fun clearXxvnSelectedMovieDetail() {
+        _xxvnSelectedMovieDetail.value = null
+    }
+
+    fun fetchXxvnMovies(page: Int = 1) {
+        viewModelScope.launch {
+            _xxvnIsSearching.value = true
+            _xxvnCurrentPage.value = page
+            try {
+                val category = _xxvnCategory.value
+                val response = if (category.isEmpty()) {
+                    AdultScrapers.getLatestXxvnMovies(page)
+                } else {
+                    AdultScrapers.getXxvnMoviesByCategory(category, page)
+                }
+                if (response.status) {
+                    _xxvnMovies.value = response.movies
+                    response.page?.let { pag ->
+                        _xxvnTotalPages.value = pag.last_page
+                        _xxvnTotalItems.value = pag.total
+                    }
+                } else {
+                    _xxvnMovies.value = emptyList()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _xxvnMovies.value = emptyList()
+            } finally {
+                _xxvnIsSearching.value = false
+            }
+        }
+    }
+
+    fun searchXxvnMovies(page: Int = 1) {
+        val query = _xxvnSearchQuery.value.trim()
+        if (query.isEmpty()) {
+            fetchXxvnMovies(page)
+            return
+        }
+        viewModelScope.launch {
+            _xxvnIsSearching.value = true
+            _xxvnCurrentPage.value = page
+            try {
+                val results = AdultScrapers.searchXxvnMovies(query, page)
+                _xxvnMovies.value = results
+                // Estimate page total for html scraper
+                _xxvnTotalPages.value = if (results.size < 50) page else page + 1
+                _xxvnTotalItems.value = if (results.size < 50) (page - 1) * 50 + results.size else page * 50 + 1
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _xxvnMovies.value = emptyList()
+            } finally {
+                _xxvnIsSearching.value = false
+            }
+        }
+    }
+
+    fun fetchXxvnMovieDetail(slug: String) {
+        viewModelScope.launch {
+            _xxvnIsLoadingDetail.value = true
+            try {
+                val detail = AdultScrapers.getXxvnMovieDetail(slug)
+                if (detail.status) {
+                    _xxvnSelectedMovieDetail.value = detail
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _xxvnIsLoadingDetail.value = false
+            }
+        }
+    }
 }
 

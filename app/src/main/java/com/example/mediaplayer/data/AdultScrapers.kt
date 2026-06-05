@@ -4,6 +4,8 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import java.net.URLEncoder
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 data class AdultVideoItem(
     val title: String,
@@ -13,9 +15,81 @@ data class AdultVideoItem(
     val source: String // "xnxx" or "spankbang"
 )
 
+@Serializable
+data class XxvnCategory(
+    val id: String = "",
+    val name: String = "",
+    val slug: String = ""
+)
+
+@Serializable
+data class XxvnCountry(
+    val id: String = "",
+    val name: String = "",
+    val slug: String = ""
+)
+
+@Serializable
+data class XxvnEpisodeData(
+    val name: String = "",
+    val slug: String = "",
+    val link: String = ""
+)
+
+@Serializable
+data class XxvnEpisodeServer(
+    val server_name: String = "",
+    val server_data: List<XxvnEpisodeData> = emptyList()
+)
+
+@Serializable
+data class XxvnMovieItem(
+    val id: String,
+    val name: String,
+    val slug: String,
+    val content: String? = "",
+    val type: String? = "",
+    val status: String? = "",
+    val thumb_url: String? = "",
+    val time: String? = "",
+    val quality: String? = "",
+    val lang: String? = null,
+    val actors: List<String> = emptyList(),
+    val categories: List<XxvnCategory> = emptyList(),
+    val country: XxvnCountry? = null,
+    val episodes: List<XxvnEpisodeServer> = emptyList()
+)
+
+@Serializable
+data class XxvnPageInfo(
+    val current_page: Int = 1,
+    val from: Int? = null,
+    val to: Int? = null,
+    val total: Int = 0,
+    val per_page: Int = 50,
+    val last_page: Int = 1
+)
+
+@Serializable
+data class XxvnMoviesResponse(
+    val status: Boolean = false,
+    val msg: String = "",
+    val movies: List<XxvnMovieItem> = emptyList(),
+    val page: XxvnPageInfo? = null
+)
+
+@Serializable
+data class XxvnMovieDetailResponse(
+    val status: Boolean = false,
+    val msg: String = "",
+    val movie: XxvnMovieItem? = null
+)
+
 object AdultScrapers {
     private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     private const val AGE_COOKIE = "age_pass=1; pg_interstitial_v5=1; player_quality=1080"
+    
+    private val json = Json { ignoreUnknownKeys = true }
 
     private val xnxxLinkRegex = Regex("""href="(/video-[^"]+)"""")
     private val xnxxImgRegex = Regex("""(?:data-src|src)="([^"]+)"""")
@@ -34,6 +108,11 @@ object AdultScrapers {
     private val spankbangStreamDataRegex = Regex("""var\s+stream_data\s*=\s*(\{.*?});""", kotlin.text.RegexOption.DOT_MATCHES_ALL)
     private val urlRegex = Regex("""https?://[^\s"']+\.(?:m3u8|mp4)[^\s"']*""")
 
+    private val searchItemRegex = Regex(
+        """href="[^"]*/phim/([^"]+)".*?>(.*?)</a>.*?class="status"[^>]*>(.*?)</span>.*?class="category type"[^>]*>(.*?)</span>.*?class="region"[^>]*>(.*?)</span>.*?class="time"[^>]*>.*?<font[^>]*>(.*?)</font>""",
+        RegexOption.DOT_MATCHES_ALL
+    )
+
     private suspend fun fetchHtml(urlString: String): String {
         return try {
             val client = HttpClientFactory.client
@@ -51,6 +130,112 @@ object AdultScrapers {
             ""
         }
     }
+
+    // --- XXVNAPI.COM Endpoints ---
+
+    suspend fun getLatestXxvnMovies(page: Int): XxvnMoviesResponse {
+        val url = "https://xxvnapi.com/api/phim-moi-cap-nhat?page=$page"
+        val responseText = fetchHtml(url)
+        if (responseText.isBlank()) {
+            return XxvnMoviesResponse(status = false, msg = "Empty response")
+        }
+        return try {
+            json.decodeFromString<XxvnMoviesResponse>(responseText)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            XxvnMoviesResponse(status = false, msg = e.message ?: "JSON parse error")
+        }
+    }
+
+    suspend fun getXxvnMoviesByCategory(categorySlug: String, page: Int): XxvnMoviesResponse {
+        val url = "https://xxvnapi.com/api/chuyen-muc/$categorySlug?page=$page"
+        val responseText = fetchHtml(url)
+        if (responseText.isBlank()) {
+            return XxvnMoviesResponse(status = false, msg = "Empty response")
+        }
+        return try {
+            json.decodeFromString<XxvnMoviesResponse>(responseText)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            XxvnMoviesResponse(status = false, msg = e.message ?: "JSON parse error")
+        }
+    }
+
+    suspend fun getXxvnMovieDetail(slug: String): XxvnMovieDetailResponse {
+        val url = "https://xxvnapi.com/api/phim/$slug"
+        val responseText = fetchHtml(url)
+        if (responseText.isBlank()) {
+            return XxvnMovieDetailResponse(status = false, msg = "Empty response")
+        }
+        return try {
+            json.decodeFromString<XxvnMovieDetailResponse>(responseText)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            XxvnMovieDetailResponse(status = false, msg = e.message ?: "JSON parse error")
+        }
+    }
+
+    suspend fun searchXxvnMovies(query: String, page: Int): List<XxvnMovieItem> {
+        if (query.isBlank()) return emptyList()
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val url = "https://xxvnapi.com/tim-kiem?k=$encoded&page=$page"
+        val html = fetchHtml(url)
+        if (html.isBlank()) return emptyList()
+
+        val results = mutableListOf<XxvnMovieItem>()
+        searchItemRegex.findAll(html).forEach { match ->
+            val slug = match.groupValues[1].trim()
+            val name = match.groupValues[2].trim()
+            val status = match.groupValues[3].trim()
+            val categoryName = match.groupValues[4].trim()
+            val countryName = match.groupValues[5].trim()
+            val time = match.groupValues[6].trim()
+
+            results.add(
+                XxvnMovieItem(
+                    id = slug,
+                    name = name,
+                    slug = slug,
+                    status = status,
+                    quality = status,
+                    time = time,
+                    categories = listOf(XxvnCategory(name = categoryName, slug = "")),
+                    country = XxvnCountry(name = countryName, slug = "")
+                )
+            )
+        }
+        return results
+    }
+
+    fun parseDfPlayerUrl(dfPlayerUrl: String): String {
+        if (dfPlayerUrl.isBlank()) return ""
+        if (dfPlayerUrl.endsWith(".m3u8") || dfPlayerUrl.endsWith(".mp4")) {
+            return dfPlayerUrl
+        }
+        try {
+            val uri = android.net.Uri.parse(dfPlayerUrl)
+            val scheme = uri.scheme ?: "https"
+            val host = uri.host ?: "v.dfplayer.net"
+            
+            val id = uri.getQueryParameter("id")
+            if (id != null) {
+                return "$scheme://$host/v1/s/$id.m3u8"
+            }
+            val did = uri.getQueryParameter("did")
+            if (did != null) {
+                return "$scheme://$host/v2/s/$did.m3u8"
+            }
+            val urlParam = uri.getQueryParameter("url")
+            if (urlParam != null) {
+                return urlParam
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return dfPlayerUrl
+    }
+
+    // --- Legacy scraping methods ---
 
     suspend fun searchXnxx(query: String): List<AdultVideoItem> {
         if (query.isBlank()) return emptyList()
@@ -167,3 +352,4 @@ object AdultScrapers {
         }
     }
 }
+
