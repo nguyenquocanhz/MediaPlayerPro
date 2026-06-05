@@ -5,6 +5,7 @@ import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
+import java.util.concurrent.TimeUnit
 
 object HttpClientFactory {
     val client: HttpClient by lazy {
@@ -18,6 +19,9 @@ object HttpClientFactory {
             }
             engine {
                 config {
+                    connectTimeout(15, TimeUnit.SECONDS)
+                    readTimeout(30, TimeUnit.SECONDS)
+                    writeTimeout(15, TimeUnit.SECONDS)
                     followRedirects(true)
                 }
             }

@@ -196,6 +196,9 @@ fun MainScreen(
     var showHlsDialog by remember { mutableStateOf(false) }
     var hlsUrl by remember { mutableStateOf("") }
     var hlsTitle by remember { mutableStateOf("") }
+    var videoToRename by remember { mutableStateOf<VideoItem?>(null) }
+    var videoToDelete by remember { mutableStateOf<VideoItem?>(null) }
+    var renameNewName by remember { mutableStateOf("") }
 
     // States for Music view
     val localMusicList by viewModel.music.collectAsState()
@@ -257,14 +260,8 @@ fun MainScreen(
                 NavigationBarItem(
                     selected = activeBottomTab == 2,
                     onClick = { activeBottomTab = 2 },
-                    icon = { Icon(Icons.Default.SensorOccupied, contentDescription = null) },
-                    label = { Text(Loc.xxnapiBottomTab) }
-                )
-                NavigationBarItem(
-                    selected = activeBottomTab == 3,
-                    onClick = { activeBottomTab = 3 },
                     icon = { Icon(Icons.Default.SmartDisplay, contentDescription = null) },
-                    label = { Text(Loc.spankbangBottomTab) }
+                    label = { Text("AV JAV") }
                 )
             }
         }
@@ -302,7 +299,10 @@ fun MainScreen(
                             shape = RoundedCornerShape(12.dp)
                         )
 
-                        TabRow(selectedTabIndex = videoFolderTab) {
+                        ScrollableTabRow(
+                            selectedTabIndex = videoFolderTab,
+                            edgePadding = 0.dp
+                        ) {
                             Tab(
                                 selected = videoFolderTab == 0,
                                 onClick = { videoFolderTab = 0 },
@@ -347,7 +347,7 @@ fun MainScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -412,13 +412,13 @@ fun MainScreen(
                                     } else {
                                         if (isGridView) {
                                             LazyVerticalGrid(
-                                                columns = GridCells.Fixed(2),
-                                                contentPadding = PaddingValues(12.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                                columns = GridCells.Adaptive(minSize = 150.dp),
+                                                contentPadding = PaddingValues(8.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp),
                                                 modifier = Modifier.fillMaxSize()
                                             ) {
-                                                items(filteredVideos) { video ->
+                                                items(filteredVideos, key = { it.id }) { video ->
                                                     VideoGridCard(
                                                         video = video,
                                                         imageLoader = imageLoader,
@@ -426,6 +426,13 @@ fun MainScreen(
                                                             viewModel.setActivePlaylist(filteredVideos.map { VideoPlaylistItem(it.title, it.path, isOnline = false) })
                                                             viewModel.addRecentVideo(context, video.title, video.path, false)
                                                             onNavigate(Player(videoPath = video.path, videoTitle = video.title, isOnline = false))
+                                                        },
+                                                        onRenameClick = {
+                                                            videoToRename = video
+                                                            renameNewName = java.io.File(video.path).nameWithoutExtension
+                                                        },
+                                                        onDeleteClick = {
+                                                            videoToDelete = video
                                                         }
                                                     )
                                                 }
@@ -436,7 +443,7 @@ fun MainScreen(
                                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                                 modifier = Modifier.fillMaxSize()
                                             ) {
-                                                items(filteredVideos) { video ->
+                                                items(filteredVideos, key = { it.id }) { video ->
                                                      VideoListCard(
                                                          video = video,
                                                          imageLoader = imageLoader,
@@ -444,6 +451,13 @@ fun MainScreen(
                                                              viewModel.setActivePlaylist(filteredVideos.map { VideoPlaylistItem(it.title, it.path, isOnline = false) })
                                                              viewModel.addRecentVideo(context, video.title, video.path, false)
                                                              onNavigate(Player(videoPath = video.path, videoTitle = video.title, isOnline = false))
+                                                         },
+                                                         onRenameClick = {
+                                                             videoToRename = video
+                                                             renameNewName = java.io.File(video.path).nameWithoutExtension
+                                                         },
+                                                         onDeleteClick = {
+                                                             videoToDelete = video
                                                          }
                                                      )
                                                 }
@@ -494,7 +508,10 @@ fun MainScreen(
                             .fillMaxSize()
                             .padding(bottom = if (MusicPlayerManager.currentSong.collectAsState().value != null) 96.dp else 0.dp)
                     ) {
-                        TabRow(selectedTabIndex = musicSectionTab) {
+                        ScrollableTabRow(
+                            selectedTabIndex = musicSectionTab,
+                            edgePadding = 0.dp
+                        ) {
                             Tab(
                                 selected = musicSectionTab == 0,
                                 onClick = { musicSectionTab = 0 },
@@ -654,63 +671,45 @@ fun MainScreen(
                 }
             }
 
-            // Tab 2: XXNAPI
+            // Tab 2: AV JAV (AVDB API)
             if (activeBottomTab == 2) {
-                val xxvnMovies by viewModel.xxvnMovies.collectAsState()
-                val xxvnIsSearching by viewModel.xxvnIsSearching.collectAsState()
-                val xxvnCurrentPage by viewModel.xxvnCurrentPage.collectAsState()
-                val xxvnTotalPages by viewModel.xxvnTotalPages.collectAsState()
-                val xxvnTotalItems by viewModel.xxvnTotalItems.collectAsState()
-                val xxvnCategory by viewModel.xxvnCategory.collectAsState()
-                val xxvnSearchQuery by viewModel.xxvnSearchQuery.collectAsState()
-                val xxvnSelectedMovieDetail by viewModel.xxvnSelectedMovieDetail.collectAsState()
-                val xxvnIsLoadingDetail by viewModel.xxvnIsLoadingDetail.collectAsState()
-                
+                var isResolvingUrl by remember { mutableStateOf(false) }
+                val avdbMovies by viewModel.avdbMovies.collectAsState()
+                val avdbIsSearching by viewModel.avdbIsSearching.collectAsState()
+                val avdbCurrentPage by viewModel.avdbCurrentPage.collectAsState()
+                val avdbTotalPages by viewModel.avdbTotalPages.collectAsState()
+                val avdbTotalItems by viewModel.avdbTotalItems.collectAsState()
+                val avdbSearchQuery by viewModel.avdbSearchQuery.collectAsState()
+                val avdbSelectedMovieDetail by viewModel.avdbSelectedMovieDetail.collectAsState()
+                val avdbIsLoadingDetail by viewModel.avdbIsLoadingDetail.collectAsState()
+
                 LaunchedEffect(Unit) {
-                    if (xxvnMovies.isEmpty()) {
-                        viewModel.fetchXxvnMovies(1)
+                    if (avdbMovies.isEmpty()) {
+                        viewModel.fetchAvdbMovies(1)
                     }
                 }
-                
-                XxvnMoviesSection(
+
+                AvdbMoviesSection(
                     viewModel = viewModel,
-                    movies = xxvnMovies,
-                    isSearching = xxvnIsSearching,
-                    currentPage = xxvnCurrentPage,
-                    totalPages = xxvnTotalPages,
-                    totalItems = xxvnTotalItems,
-                    activeCategory = xxvnCategory,
-                    searchQuery = xxvnSearchQuery,
-                    selectedMovieDetail = xxvnSelectedMovieDetail,
-                    isLoadingDetail = xxvnIsLoadingDetail,
+                    movies = avdbMovies,
+                    isSearching = avdbIsSearching,
+                    currentPage = avdbCurrentPage,
+                    totalPages = avdbTotalPages,
+                    totalItems = avdbTotalItems,
+                    searchQuery = avdbSearchQuery,
+                    selectedMovieDetail = avdbSelectedMovieDetail,
+                    isLoadingDetail = avdbIsLoadingDetail,
                     context = context,
                     onNavigate = onNavigate,
-                    scope = scope
-                )
-            }
-
-            // Tab 3: SpankBang
-            if (activeBottomTab == 3) {
-                var isResolvingUrl by remember { mutableStateOf(false) }
-                val spankQuery by viewModel.spankbangSearchQuery.collectAsState()
-                val spankResults by viewModel.spankbangResults.collectAsState()
-                val isSearching by viewModel.isSpankbangSearching.collectAsState()
-                
-                AdultSearchSection(
-                    sourceName = "SpankBang",
-                    results = spankResults,
-                    isSearching = isSearching,
-                    searchQuery = spankQuery,
-                    onSearchQueryChange = { viewModel.setSpankbangSearchQuery(it) },
-                    onSearchClick = { viewModel.searchSpankbang(spankQuery) },
-                    onPlayClick = { item ->
+                    scope = scope,
+                    onPlayClick = { embedUrl, title ->
                         scope.launch {
                             isResolvingUrl = true
-                            val streamUrl = AdultScrapers.getSpankbangStreamUrl(item.pageUrl)
+                            val streamUrl = AdultScrapers.getAvdbStreamUrl(embedUrl)
                             isResolvingUrl = false
                             if (streamUrl.isNotBlank()) {
-                                viewModel.addRecentVideo(context, item.title, streamUrl, true)
-                                onNavigate(com.example.mediaplayer.Player(videoPath = streamUrl, videoTitle = item.title, isOnline = true))
+                                viewModel.addRecentVideo(context, title, streamUrl, true)
+                                onNavigate(com.example.mediaplayer.Player(videoPath = streamUrl, videoTitle = title, isOnline = true))
                             } else {
                                 Toast.makeText(context, "Không thể lấy link phát video!", Toast.LENGTH_SHORT).show()
                             }
@@ -720,6 +719,68 @@ fun MainScreen(
 
                 if (isResolvingUrl) {
                     AdultUrlResolvingOverlay()
+                }
+            }
+
+            // --- Active HLS Recordings Progress Banner ---
+            val hlsRecordState by viewModel.hlsRecordState.collectAsState()
+            if (hlsRecordState.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(horizontal = 16.dp, vertical = 80.dp)
+                        .fillMaxWidth()
+                ) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)),
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = CardDefaults.cardElevation(6.dp),
+                        modifier = Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("🔴 Đang ghi luồng stream ngầm...", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                            hlsRecordState.forEach { (url, state) ->
+                                val (progress, statusText) = state
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        val displayTitle = url.substringBefore("?").substringAfterLast("/")
+                                        Text(
+                                            text = if (displayTitle.length > 30) displayTitle.take(30) + "..." else displayTitle,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(statusText, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    CircularProgressIndicator(
+                                        progress = progress,
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.5.dp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    IconButton(
+                                        onClick = { viewModel.removeHlsRecording(url) },
+                                        modifier = Modifier.size(20.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Hủy bỏ / Đóng",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -797,7 +858,13 @@ fun MainScreen(
                     )
                     OutlinedTextField(
                         value = hlsUrl,
-                        onValueChange = { hlsUrl = it },
+                        onValueChange = {
+                            hlsUrl = it
+                            val detected = detectMovieName(it)
+                            if (detected.isNotEmpty()) {
+                                hlsTitle = detected
+                            }
+                        },
                         label = { Text(Loc.hlsUrlPlaceholder) },
                         placeholder = { Text("https://example.com/stream.m3u8") },
                         singleLine = true,
@@ -806,23 +873,104 @@ fun MainScreen(
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        if (hlsUrl.trim().isNotEmpty()) {
-                            val title = if (hlsTitle.trim().isEmpty()) "HLS Stream" else hlsTitle
-                            showHlsDialog = false
-                            viewModel.addRecentVideo(context, title, hlsUrl.trim(), true)
-                            onNavigate(Player(videoPath = hlsUrl.trim(), videoTitle = title, isOnline = true))
-                        } else {
-                            Toast.makeText(context, "Vui lòng nhập đường dẫn URL!", Toast.LENGTH_SHORT).show()
-                        }
-                    }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(Loc.playNow)
+                    TextButton(
+                        onClick = {
+                            if (hlsUrl.trim().isNotEmpty()) {
+                                val title = if (hlsTitle.trim().isEmpty()) "HLS Stream" else hlsTitle
+                                showHlsDialog = false
+                                viewModel.startHlsRecording(context, hlsUrl.trim(), title)
+                            } else {
+                                Toast.makeText(context, "Vui lòng nhập đường dẫn URL!", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Text("Ghi luồng (Record)", fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = {
+                            if (hlsUrl.trim().isNotEmpty()) {
+                                val title = if (hlsTitle.trim().isEmpty()) "HLS Stream" else hlsTitle
+                                showHlsDialog = false
+                                viewModel.addRecentVideo(context, title, hlsUrl.trim(), true)
+                                onNavigate(Player(videoPath = hlsUrl.trim(), videoTitle = title, isOnline = true))
+                            } else {
+                                Toast.makeText(context, "Vui lòng nhập đường dẫn URL!", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Text(Loc.playNow)
+                    }
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showHlsDialog = false }) {
+                    Text(Loc.cancel)
+                }
+            }
+        )
+    }
+
+    if (videoToRename != null) {
+        AlertDialog(
+            onDismissRequest = { videoToRename = null },
+            title = { Text("Đổi tên video") },
+            text = {
+                OutlinedTextField(
+                    value = renameNewName,
+                    onValueChange = { renameNewName = it },
+                    label = { Text("Tên video mới") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val currentVideo = videoToRename
+                        if (currentVideo != null && renameNewName.trim().isNotEmpty()) {
+                            viewModel.renameVideo(context, currentVideo, renameNewName.trim())
+                            videoToRename = null
+                        }
+                    }
+                ) {
+                    Text("Đồng ý")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { videoToRename = null }) {
+                    Text(Loc.cancel)
+                }
+            }
+        )
+    }
+
+    if (videoToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { videoToDelete = null },
+            title = { Text("Xóa video") },
+            text = {
+                Text("Bạn có chắc chắn muốn xóa video '${videoToDelete?.title}' vĩnh viễn? Hành động này không thể hoàn tác.")
+            },
+            confirmButton = {
+                Button(
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    onClick = {
+                        val currentVideo = videoToDelete
+                        if (currentVideo != null) {
+                            viewModel.deleteVideo(context, currentVideo)
+                            videoToDelete = null
+                        }
+                    }
+                ) {
+                    Text("Xóa", color = MaterialTheme.colorScheme.onError)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { videoToDelete = null }) {
                     Text(Loc.cancel)
                 }
             }
@@ -980,7 +1128,7 @@ fun MusicPlayerOverlay(song: MusicItem, onClick: () -> Unit) {
                 // Rotating album CD
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
                         .background(Color(0xFF222831))
                         .rotate(if (isPlaying) rotation else 0f),
@@ -1018,7 +1166,7 @@ fun MusicPlayerOverlay(song: MusicItem, onClick: () -> Unit) {
                 // Audio controls
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
                     IconButton(onClick = { MusicPlayerManager.previous() }) {
                         Icon(Icons.Default.SkipPrevious, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
@@ -1084,12 +1232,13 @@ fun Modifier.fillGridOrColumn(activeTab: Int) = this
     .fillMaxWidth()
     .fillMaxHeight()
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VideoListCard(
     video: VideoItem,
     imageLoader: ImageLoader,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onRenameClick: () -> Unit,
+    onDeleteClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -1173,6 +1322,42 @@ fun VideoListCard(
                     }
                 }
             }
+            
+            var showMenu by remember { mutableStateOf(false) }
+            
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Tùy chọn"
+                    )
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Đổi tên") },
+                        onClick = {
+                            showMenu = false
+                            onRenameClick()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Xóa", color = Color.Red) },
+                        onClick = {
+                            showMenu = false
+                            onDeleteClick()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red, modifier = Modifier.size(16.dp))
+                        }
+                    )
+                }
+            }
         }
     }
 }
@@ -1181,7 +1366,9 @@ fun VideoListCard(
 fun VideoGridCard(
     video: VideoItem,
     imageLoader: ImageLoader,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onRenameClick: () -> Unit,
+    onDeleteClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -1240,22 +1427,67 @@ fun VideoGridCard(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = VideoScanner.formatSize(video.size),
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Box(
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = video.extension.uppercase(),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                            text = VideoScanner.formatSize(video.size),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Box(
+                            modifier = Modifier
+                                .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = video.extension.uppercase(),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                    
+                    var showMenu by remember { mutableStateOf(false) }
+                    
+                    Box {
+                        IconButton(
+                            onClick = { showMenu = true },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Tùy chọn",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Đổi tên") },
+                                onClick = {
+                                    showMenu = false
+                                    onRenameClick()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Xóa", color = Color.Red) },
+                                onClick = {
+                                    showMenu = false
+                                    onDeleteClick()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red, modifier = Modifier.size(16.dp))
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -1406,6 +1638,7 @@ fun OnlineMoviesSection(
     val kkCategory by viewModel.kkCategory.collectAsState()
     val kkCountry by viewModel.kkCountry.collectAsState()
     val kkYear by viewModel.kkYear.collectAsState()
+    val kkType by viewModel.kkType.collectAsState()
     val kkLimit by viewModel.kkLimit.collectAsState()
 
     val selectedMovieDetail by viewModel.kkSelectedMovieDetail.collectAsState()
@@ -1413,10 +1646,8 @@ fun OnlineMoviesSection(
 
     var showFilters by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        if (kkMovies.isEmpty()) {
-            viewModel.fetchLatestKkMovies(1)
-        }
+    LaunchedEffect(kkCategory, kkCountry, kkSortField, kkSortType, kkSortLang, kkYear, kkType) {
+        viewModel.fetchLatestKkMovies(1)
     }
 
     val txtImportLauncher = rememberLauncherForActivityResult(
@@ -1560,13 +1791,14 @@ fun OnlineMoviesSection(
                         Text("Tìm kiếm", fontSize = 13.sp)
                     }
 
-                    if (kkMovieSearchQuery.isNotEmpty() || kkCategory.isNotEmpty() || kkCountry.isNotEmpty() || kkYear.isNotEmpty()) {
+                    if (kkMovieSearchQuery.isNotEmpty() || kkCategory.isNotEmpty() || kkCountry.isNotEmpty() || kkYear.isNotEmpty() || kkType.isNotEmpty()) {
                         OutlinedButton(
                             onClick = {
                                 viewModel.setKkMovieSearchQuery("")
                                 viewModel.kkCategory.value = ""
                                 viewModel.kkCountry.value = ""
                                 viewModel.kkYear.value = ""
+                                viewModel.kkType.value = ""
                                 viewModel.kkSortField.value = "modified.time"
                                 viewModel.kkSortType.value = "desc"
                                 viewModel.kkSortLang.value = ""
@@ -1659,6 +1891,20 @@ fun OnlineMoviesSection(
                                     )
                                 }
                                 Box(modifier = Modifier.weight(1f)) {
+                                    FilterDropdown(
+                                        label = "Định dạng",
+                                        selectedValue = kkType,
+                                        options = MOVIE_TYPES,
+                                        onValueChange = { viewModel.kkType.value = it }
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(modifier = Modifier.weight(0.5f)) {
                                     OutlinedTextField(
                                         value = kkYear,
                                         onValueChange = { viewModel.kkYear.value = it },
@@ -1667,8 +1913,9 @@ fun OnlineMoviesSection(
                                         shape = RoundedCornerShape(8.dp),
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth()
-                                    )
+                                     )
                                 }
+                                Spacer(modifier = Modifier.weight(0.5f))
                             }
                         }
                     }
@@ -1869,6 +2116,14 @@ val COUNTRIES = listOf(
     "dai-loan" to "Đài Loan"
 )
 
+val MOVIE_TYPES = listOf(
+    "" to "Mọi định dạng",
+    "phim-bo" to "Phim bộ",
+    "phim-le" to "Phim lẻ",
+    "hoat-hinh" to "Hoạt hình",
+    "tv-shows" to "TV Shows"
+)
+
 val SORT_FIELDS = listOf(
     "modified.time" to "Mới cập nhật",
     "_id" to "Theo ID",
@@ -1885,6 +2140,29 @@ val SORT_LANGS = listOf(
     "vietsub" to "Vietsub",
     "thuyet-minh" to "Thuyết Minh",
     "long-tieng" to "Lồng Tiếng"
+)
+
+val AVDB_CATEGORIES = listOf(
+    "" to "Tất cả thể loại",
+    "1" to "Censored",
+    "2" to "Uncensored",
+    "3" to "Uncensored Leaked",
+    "4" to "Amateur",
+    "5" to "Chinese AV",
+    "6" to "Hentai",
+    "7" to "English subtitle"
+)
+
+val AVDB_SORT_DIRECTIONS = listOf(
+    "desc" to "Mới nhất",
+    "asc" to "Cũ nhất"
+)
+
+val AVDB_UPDATE_HOURS = listOf(
+    "" to "Mọi lúc",
+    "24" to "24 giờ qua",
+    "48" to "48 giờ qua",
+    "168" to "7 ngày qua"
 )
 
 @Composable
@@ -1913,7 +2191,7 @@ fun FilterDropdown(
             ) {
                 Column {
                     Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(text = displayLabel, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Text(text = displayLabel, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Icon(Icons.Default.ArrowDropDown, contentDescription = null)
             }
@@ -2240,28 +2518,54 @@ fun RecentVideosSection(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AdultSearchSection(
-    sourceName: String,
-    results: List<com.example.mediaplayer.data.AdultVideoItem>,
+fun AvdbMoviesSection(
+    viewModel: MainScreenViewModel,
+    movies: List<com.example.mediaplayer.data.AvdbMovieItem>,
     isSearching: Boolean,
+    currentPage: Int,
+    totalPages: Int,
+    totalItems: Int,
     searchQuery: String,
-    onSearchQueryChange: (String) -> Unit,
-    onSearchClick: () -> Unit,
-    onPlayClick: (com.example.mediaplayer.data.AdultVideoItem) -> Unit,
-    modifier: Modifier = Modifier
+    selectedMovieDetail: com.example.mediaplayer.data.AvdbMovieItem?,
+    isLoadingDetail: Boolean,
+    context: Context,
+    onNavigate: (androidx.navigation3.runtime.NavKey) -> Unit,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onPlayClick: (String, String) -> Unit
 ) {
-    Column(modifier = modifier.fillMaxSize().padding(12.dp)) {
+    var isGridView by remember { mutableStateOf(true) }
+    var showFilters by remember { mutableStateOf(false) }
+
+    val avdbT by viewModel.avdbT.collectAsState()
+    val avdbYear by viewModel.avdbYear.collectAsState()
+    val avdbSortDirection by viewModel.avdbSortDirection.collectAsState()
+    val avdbH by viewModel.avdbH.collectAsState()
+
+    LaunchedEffect(avdbT, avdbYear, avdbSortDirection, avdbH) {
+        viewModel.fetchAvdbMovies(1)
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+        // Search bar
         OutlinedTextField(
             value = searchQuery,
-            onValueChange = onSearchQueryChange,
-            placeholder = { Text("Tìm video trên $sourceName...") },
+            onValueChange = { viewModel.setAvdbSearchQuery(it) },
+            placeholder = { Text("Tìm kiếm JAV (mã, diễn viên, từ khóa)...") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { onSearchQueryChange("") }) {
-                        Icon(Icons.Default.Close, contentDescription = null)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.setAvdbSearchQuery("") }) {
+                            Icon(Icons.Default.Close, contentDescription = null)
+                        }
+                    }
+                    IconButton(onClick = { showFilters = !showFilters }) {
+                        Icon(
+                            imageVector = Icons.Default.FilterList,
+                            contentDescription = "Bộ lọc",
+                            tint = if (showFilters) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             },
@@ -2271,381 +2575,224 @@ fun AdultSearchSection(
         
         Spacer(modifier = Modifier.height(10.dp))
         
-        Button(
-            onClick = onSearchClick,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Icon(Icons.Default.Search, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Tìm kiếm $sourceName")
-        }
-        
-        Spacer(modifier = Modifier.height(10.dp))
-        
-        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-            isRefreshing = isSearching,
-            onRefresh = onSearchClick,
-            modifier = Modifier.fillMaxSize()
-        ) {
-            if (results.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (isSearching) "Đang tìm kiếm..." else "Nhập từ khóa để tìm video trực tuyến.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(bottom = 80.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(results) { item ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onPlayClick(item) },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(width = 100.dp, height = 70.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color.Black),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (item.thumbnailUrl.startsWith("http")) {
-                                        AsyncImage(
-                                            model = item.thumbnailUrl,
-                                            contentDescription = null,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Default.SmartDisplay,
-                                            contentDescription = null,
-                                            tint = Color.White.copy(alpha = 0.5f),
-                                            modifier = Modifier.size(36.dp)
-                                        )
-                                    }
-                                    
-                                    if (item.duration.isNotBlank()) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.BottomEnd)
-                                                .padding(4.dp)
-                                                .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 4.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = item.duration,
-                                                color = Color.White,
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
-                                
-                                Spacer(modifier = Modifier.width(16.dp))
-                                
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = item.title,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "Nguồn: ${item.source.uppercase()}",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun AdultUrlResolvingOverlay() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.6f))
-            .clickable(enabled = false) {},
-        contentAlignment = Alignment.Center
-    ) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            modifier = Modifier.padding(24.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                CircularProgressIndicator()
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("Đang giải mã đường dẫn luồng phát trực tuyến...", fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
-@Composable
-fun XxvnMoviesSection(
-    viewModel: MainScreenViewModel,
-    movies: List<com.example.mediaplayer.data.XxvnMovieItem>,
-    isSearching: Boolean,
-    currentPage: Int,
-    totalPages: Int,
-    totalItems: Int,
-    activeCategory: String,
-    searchQuery: String,
-    selectedMovieDetail: com.example.mediaplayer.data.XxvnMovieDetailResponse?,
-    isLoadingDetail: Boolean,
-    context: Context,
-    onNavigate: (androidx.navigation3.runtime.NavKey) -> Unit,
-    scope: kotlinx.coroutines.CoroutineScope
-) {
-    var isGridView by remember { mutableStateOf(true) }
-
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-        // Search bar
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { viewModel.setXxvnSearchQuery(it) },
-            placeholder = { Text("Tìm phim trên XXVN...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { viewModel.setXxvnSearchQuery("") }) {
-                        Icon(Icons.Default.Close, contentDescription = null)
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            singleLine = true
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Search Button, Reset and Toggle view mode
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Button(
-                onClick = { viewModel.searchXxvnMovies(1) },
+                onClick = { viewModel.searchAvdbMovies(1) },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Icon(Icons.Default.Search, contentDescription = null)
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Tìm kiếm", fontSize = 13.sp)
-            }
-
-            if (searchQuery.isNotEmpty() || activeCategory.isNotEmpty()) {
-                OutlinedButton(
-                    onClick = {
-                        viewModel.setXxvnSearchQuery("")
-                        viewModel.setXxvnCategory("")
-                    },
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Đặt lại", fontSize = 13.sp)
-                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Tìm kiếm")
             }
 
             IconButton(onClick = { isGridView = !isGridView }) {
                 Icon(
                     imageVector = if (isGridView) Icons.Default.List else Icons.Default.GridView,
-                    contentDescription = "Chế độ hiển thị"
+                    contentDescription = null
                 )
             }
         }
-
+        
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Category Chips (Horizontal Scrollable)
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+        AnimatedVisibility(
+            visible = showFilters,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
         ) {
-            val categoriesList = listOf(
-                "" to "Mới nhất",
-                "hiep-dam" to "Hiếp dâm",
-                "hentai" to "Hentai",
-                "jav-hd" to "Jav HD",
-                "viet-nam-clip" to "Việt Nam",
-                "chau-au" to "Châu Âu",
-                "trung-quoc" to "Trung Quốc",
-                "han-quoc-18-" to "Hàn Quốc 18+",
-                "khong-che" to "AV Không che",
-                "sexhd" to "Sex HD",
-                "vietsub" to "Vietsub",
-                "xvideos" to "Xvideos",
-                "nhat-ban" to "Nhật Bản",
-                "hoc-sinh" to "Học sinh",
-                "vung-trom" to "Vụng trộm",
-                "tap-the" to "Tập thể",
-                "loan-luan" to "Loạn luân",
-                "pornhub" to "PornHub"
-            )
-            items(categoriesList) { (slug, name) ->
-                val isSelected = activeCategory == slug
-                FilterChip(
-                    selected = isSelected,
-                    onClick = { viewModel.setXxvnCategory(slug) },
-                    label = { Text(name, fontSize = 11.sp) }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Movie List / Grid
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            if (isSearching) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    CircularProgressIndicator()
-                }
-            } else if (movies.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Không tìm thấy kết quả nào.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 80.dp)
-                ) {
-                    if (isGridView) {
-                        val movieChunks = movies.chunked(2)
-                        items(movieChunks) { rowItems ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Bộ lọc AV JAV",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        if (avdbT.isNotEmpty() || avdbYear.isNotEmpty() || avdbSortDirection != "desc" || avdbH.isNotEmpty()) {
+                            TextButton(
+                                onClick = {
+                                    viewModel.avdbT.value = ""
+                                    viewModel.avdbYear.value = ""
+                                    viewModel.avdbSortDirection.value = "desc"
+                                    viewModel.avdbH.value = ""
+                                }
                             ) {
-                                rowItems.forEach { movie ->
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        XxvnMovieGridCard(
-                                            movie = movie,
-                                            onClick = {
-                                                viewModel.fetchXxvnMovieDetail(movie.slug)
-                                            }
-                                        )
-                                    }
-                                }
-                                if (rowItems.size < 2) {
-                                    Spacer(modifier = Modifier.weight(1f))
-                                }
+                                Text("Đặt lại", fontSize = 11.sp)
                             }
                         }
-                    } else {
-                        items(movies) { movie ->
-                            XxvnMovieListCard(
-                                movie = movie,
-                                onClick = {
-                                    viewModel.fetchXxvnMovieDetail(movie.slug)
-                                }
+                    }
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            FilterDropdown(
+                                label = "Thể loại",
+                                selectedValue = avdbT,
+                                options = AVDB_CATEGORIES,
+                                onValueChange = { viewModel.avdbT.value = it }
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            FilterDropdown(
+                                label = "Sắp xếp",
+                                selectedValue = avdbSortDirection,
+                                options = AVDB_SORT_DIRECTIONS,
+                                onValueChange = { viewModel.avdbSortDirection.value = it }
                             )
                         }
                     }
 
-                    if (totalPages > 1) {
-                        item {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconButton(
-                                    enabled = currentPage > 1 && !isSearching,
-                                    onClick = {
-                                        val prev = currentPage - 1
-                                        if (searchQuery.isEmpty()) {
-                                            viewModel.fetchXxvnMovies(prev)
-                                        } else {
-                                            viewModel.searchXxvnMovies(prev)
-                                        }
-                                    }
-                                ) {
-                                    Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Trang trước")
-                                }
-
-                                Text(
-                                    text = "$currentPage / $totalPages" + if (totalItems > 0 && searchQuery.isEmpty()) " ($totalItems phim)" else "",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-
-                                IconButton(
-                                    enabled = currentPage < totalPages && !isSearching,
-                                    onClick = {
-                                        val next = currentPage + 1
-                                        if (searchQuery.isEmpty()) {
-                                            viewModel.fetchXxvnMovies(next)
-                                        } else {
-                                            viewModel.searchXxvnMovies(next)
-                                        }
-                                    }
-                                ) {
-                                    Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Trang sau")
-                                }
-                            }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            FilterDropdown(
+                                label = "Cập nhật",
+                                selectedValue = avdbH,
+                                options = AVDB_UPDATE_HOURS,
+                                onValueChange = { viewModel.avdbH.value = it }
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedTextField(
+                                value = avdbYear,
+                                onValueChange = { viewModel.avdbYear.value = it },
+                                label = { Text("Năm phát hành", fontSize = 11.sp) },
+                                placeholder = { Text("2024") },
+                                shape = RoundedCornerShape(8.dp),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
                 }
             }
         }
-    }
-
-    // Detail Dialog
-    selectedMovieDetail?.let { detail ->
-        XxvnMovieEpisodeDialog(
-            detail = detail,
-            onDismiss = { viewModel.clearXxvnSelectedMovieDetail() },
-            onPlayEpisode = { episode ->
-                scope.launch {
-                    val directUrl = com.example.mediaplayer.data.AdultScrapers.parseDfPlayerUrl(episode.link)
-                    if (directUrl.isNotBlank()) {
-                        viewModel.addRecentVideo(context, "${detail.movie?.name} - ${episode.name}", directUrl, true)
-                        onNavigate(com.example.mediaplayer.Player(videoPath = directUrl, videoTitle = "${detail.movie?.name} - ${episode.name}", isOnline = true))
+        
+        PullToRefreshBox(
+            isRefreshing = isSearching,
+            onRefresh = {
+                if (searchQuery.isNotBlank()) {
+                    viewModel.searchAvdbMovies(currentPage)
+                } else {
+                    viewModel.fetchAvdbMovies(currentPage)
+                }
+            },
+            modifier = Modifier.weight(1f)
+        ) {
+            if (movies.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isSearching) "Đang tải dữ liệu..." else "Không tìm thấy phim JAV nào.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    if (isGridView) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 150.dp),
+                            contentPadding = PaddingValues(bottom = 80.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            items(movies) { movie ->
+                                AvdbMovieGridCard(
+                                    movie = movie,
+                                    onClick = {
+                                        viewModel.fetchAvdbMovieDetail(movie.id)
+                                    }
+                                )
+                            }
+                        }
                     } else {
-                        Toast.makeText(context, "Không thể phát tập phim này!", Toast.LENGTH_SHORT).show()
+                        LazyColumn(
+                            contentPadding = PaddingValues(bottom = 80.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            items(movies) { movie ->
+                                AvdbMovieListCard(
+                                    movie = movie,
+                                    onClick = {
+                                        viewModel.fetchAvdbMovieDetail(movie.id)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    
+                    // Pagination Bar
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val prev = max(1, currentPage - 1)
+                        val next = if (currentPage < totalPages) currentPage + 1 else totalPages
+                        
+                        IconButton(
+                            onClick = {
+                                if (searchQuery.isNotBlank()) {
+                                    viewModel.searchAvdbMovies(prev)
+                                } else {
+                                    viewModel.fetchAvdbMovies(prev)
+                                }
+                            },
+                            enabled = currentPage > 1
+                        ) {
+                            Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Trang trước")
+                        }
+                        
+                        Text(
+                            text = "Trang $currentPage / $totalPages ($totalItems phim)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        
+                        IconButton(
+                            onClick = {
+                                if (searchQuery.isNotBlank()) {
+                                    viewModel.searchAvdbMovies(next)
+                                } else {
+                                    viewModel.fetchAvdbMovies(next)
+                                }
+                            },
+                            enabled = currentPage < totalPages
+                        ) {
+                            Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Trang sau")
+                        }
                     }
                 }
             }
-        )
+        }
     }
 
     if (isLoadingDetail) {
@@ -2660,22 +2807,34 @@ fun XxvnMoviesSection(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 modifier = Modifier.padding(24.dp)
             ) {
-                Column(
+                Row(
                     modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(12.dp))
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
                     Text("Đang tải chi tiết phim...", fontWeight = FontWeight.Bold)
                 }
             }
         }
     }
+
+    // Detail dialog
+    if (selectedMovieDetail != null) {
+        AvdbMovieEpisodeDialog(
+            movie = selectedMovieDetail,
+            onDismiss = { viewModel.clearAvdbSelectedMovieDetail() },
+            onPlayEpisode = { embedUrl ->
+                viewModel.clearAvdbSelectedMovieDetail()
+                onPlayClick(embedUrl, selectedMovieDetail.name)
+            }
+        )
+    }
 }
 
 @Composable
-fun XxvnMovieGridCard(
-    movie: com.example.mediaplayer.data.XxvnMovieItem,
+fun AvdbMovieGridCard(
+    movie: com.example.mediaplayer.data.AvdbMovieItem,
     onClick: () -> Unit
 ) {
     Card(
@@ -2683,118 +2842,80 @@ fun XxvnMovieGridCard(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1.5f)
-                    .background(Color.Black)
+                    .height(130.dp)
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
             ) {
-                if (!movie.thumb_url.isNullOrBlank()) {
+                val imgUrl = movie.thumb_url ?: movie.poster_url ?: ""
+                if (imgUrl.startsWith("http")) {
                     AsyncImage(
-                        model = movie.thumb_url,
+                        model = imgUrl,
                         contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
                     )
                 } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Movie,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.5f),
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.SmartDisplay,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.5f),
+                        modifier = Modifier.size(40.dp)
+                    )
                 }
                 
-                if (!movie.quality.isNullOrBlank()) {
+                // Top badge for type (e.g. "Có che" or "Censored")
+                val type = movie.type_name ?: ""
+                if (type.isNotBlank()) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(6.dp)
-                            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                            .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = movie.quality,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            text = type,
+                            color = Color.White,
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
-
-                if (!movie.time.isNullOrBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(6.dp)
-                            .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = movie.time,
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
             }
-
+            
             Column(modifier = Modifier.padding(8.dp)) {
+                val code = movie.movie_code ?: movie.slug.uppercase()
                 Text(
-                    text = movie.name,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
+                    text = code,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(2.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val catName = movie.categories.firstOrNull()?.name ?: "Phim"
-                    Text(
-                        text = catName,
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    
-                    movie.country?.name?.let { ctry ->
-                        Box(
-                            modifier = Modifier
-                                .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = ctry,
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                    }
-                }
+                Text(
+                    text = movie.name,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 14.sp
+                )
             }
         }
     }
 }
 
 @Composable
-fun XxvnMovieListCard(
-    movie: com.example.mediaplayer.data.XxvnMovieItem,
+fun AvdbMovieListCard(
+    movie: com.example.mediaplayer.data.AvdbMovieItem,
     onClick: () -> Unit
 ) {
     Card(
@@ -2802,97 +2923,79 @@ fun XxvnMovieListCard(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
+            modifier = Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(90.dp, 60.dp)
+                    .size(width = 90.dp, height = 65.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color.Black),
                 contentAlignment = Alignment.Center
             ) {
-                if (!movie.thumb_url.isNullOrBlank()) {
+                val imgUrl = movie.thumb_url ?: movie.poster_url ?: ""
+                if (imgUrl.startsWith("http")) {
                     AsyncImage(
-                        model = movie.thumb_url,
+                        model = imgUrl,
                         contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
                     )
                 } else {
                     Icon(
-                        imageVector = Icons.Default.Movie,
+                        imageVector = Icons.Default.SmartDisplay,
                         contentDescription = null,
                         tint = Color.White.copy(alpha = 0.5f),
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(36.dp)
                     )
                 }
                 
-                if (!movie.quality.isNullOrBlank()) {
+                val type = movie.type_name ?: ""
+                if (type.isNotBlank()) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
-                            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(4.dp))
+                            .padding(4.dp)
+                            .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
                             .padding(horizontal = 4.dp, vertical = 1.dp)
                     ) {
                         Text(
-                            text = movie.quality,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            text = type,
+                            color = Color.White,
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
-
+            
             Spacer(modifier = Modifier.width(12.dp))
-
+            
             Column(modifier = Modifier.weight(1f)) {
+                val code = movie.movie_code ?: movie.slug.uppercase()
                 Text(
-                    text = movie.name,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = code,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.height(2.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val catName = movie.categories.firstOrNull()?.name ?: "Phim"
-                    Text(
-                        text = catName,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    
-                    movie.country?.name?.let { ctry ->
-                        Box(
-                            modifier = Modifier
-                                .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = ctry,
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                    }
-                }
-                if (!movie.time.isNullOrBlank()) {
+                Text(
+                    text = movie.name,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (!movie.year.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Thời lượng: ${movie.time}",
+                        text = "Năm phát hành: ${movie.year}",
                         fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -2902,21 +3005,20 @@ fun XxvnMovieListCard(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun XxvnMovieEpisodeDialog(
-    detail: com.example.mediaplayer.data.XxvnMovieDetailResponse,
+fun AvdbMovieEpisodeDialog(
+    movie: com.example.mediaplayer.data.AvdbMovieItem,
     onDismiss: () -> Unit,
-    onPlayEpisode: (com.example.mediaplayer.data.XxvnEpisodeData) -> Unit
+    onPlayEpisode: (String) -> Unit
 ) {
-    val movie = detail.movie ?: return
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
+            val code = movie.movie_code ?: movie.slug.uppercase()
             Text(
-                text = movie.name,
-                fontWeight = FontWeight.Bold,
+                text = code,
+                fontWeight = FontWeight.Black,
                 fontSize = 18.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                color = MaterialTheme.colorScheme.primary
             )
         },
         text = {
@@ -2926,6 +3028,13 @@ fun XxvnMovieEpisodeDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // Movie Name
+                Text(
+                    text = movie.name,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+
                 // Info Section
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2937,9 +3046,10 @@ fun XxvnMovieEpisodeDialog(
                             .clip(RoundedCornerShape(8.dp))
                             .background(Color.Black)
                     ) {
-                        if (!movie.thumb_url.isNullOrBlank()) {
+                        val imgUrl = movie.poster_url ?: movie.thumb_url ?: ""
+                        if (imgUrl.isNotBlank()) {
                             AsyncImage(
-                                model = movie.thumb_url,
+                                model = imgUrl,
                                 contentDescription = null,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
@@ -2951,59 +3061,56 @@ fun XxvnMovieEpisodeDialog(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
+                        if (!movie.type_name.isNullOrBlank()) {
+                            Text(text = "Phân loại: ${movie.type_name}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
                         if (!movie.quality.isNullOrBlank()) {
                             Text(text = "Chất lượng: ${movie.quality}", fontSize = 12.sp)
                         }
                         if (!movie.time.isNullOrBlank()) {
                             Text(text = "Thời lượng: ${movie.time}", fontSize = 12.sp)
                         }
-                        movie.country?.name?.let {
-                            Text(text = "Quốc gia: $it", fontSize = 12.sp)
+                        if (movie.actor.isNotEmpty()) {
+                            val actors = movie.actor.joinToString { it.trim() }
+                            Text(text = "Diễn viên: $actors", fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
-                        if (movie.categories.isNotEmpty()) {
-                            val cats = movie.categories.joinToString { it.name }
-                            Text(text = "Thể loại: $cats", fontSize = 12.sp)
+                        if (movie.category.isNotEmpty()) {
+                            val cats = movie.category.joinToString { it.trim() }
+                            Text(text = "Thể loại: $cats", fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
 
                 // Story/Description
-                if (!movie.content.isNullOrBlank()) {
+                if (!movie.description.isNullOrBlank()) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(text = "Nội dung:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text(text = "Tóm tắt nội dung:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Text(
-                            text = movie.content,
+                            text = movie.description,
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-
-                // Servers / Episodes List
-                if (movie.episodes.isNotEmpty()) {
-                    movie.episodes.forEach { server ->
-                        Text(
-                            text = server.server_name,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                        
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            server.server_data.forEach { ep ->
-                                Button(
-                                    onClick = { onPlayEpisode(ep) },
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
-                                ) {
-                                    Text(text = ep.name, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
+                // Episodes Section
+                Text(text = "Danh sách tập:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                val serverData = movie.episodes?.server_data ?: emptyMap()
+                if (serverData.isNotEmpty()) {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        serverData.forEach { (epName, epLink) ->
+                            Button(
+                                onClick = {
+                                    if (epLink.link_embed.isNotBlank()) {
+                                        onPlayEpisode(epLink.link_embed)
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(text = epName)
                             }
                         }
                     }
@@ -3024,3 +3131,91 @@ fun XxvnMovieEpisodeDialog(
         }
     )
 }
+
+@Composable
+fun AdultUrlResolvingOverlay() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.7f))
+            .clickable(enabled = false) {}, // Block clicks behind
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Đang giải mã luồng video...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Vui lòng chờ trong giây lát",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+private fun detectMovieName(url: String): String {
+    // Try to find /play/index/([^/?#\s]+)
+    val playIndexRegex = Regex("""/play/index/([^/?#\s]+)""")
+    val match = playIndexRegex.find(url)
+    if (match != null) {
+        return sanitizeFilename(match.groupValues[1])
+    }
+    
+    // Try to find v=<name> query parameter
+    try {
+        val uri = java.net.URI(url)
+        val query = uri.query
+        if (query != null) {
+            val params = query.split("&")
+            for (param in params) {
+                val parts = param.split("=")
+                if (parts.size == 2 && parts[0] == "v") {
+                    return sanitizeFilename(parts[1])
+                }
+            }
+        }
+        
+        // Fallback to last path segment if it's not a generic word
+        val path = uri.path ?: ""
+        val segments = path.split("/").filter { it.isNotEmpty() }
+        if (segments.isNotEmpty()) {
+            val lastSeg = segments.last()
+            if (lastSeg != "index" && lastSeg != "token_hash" && lastSeg != "play") {
+                return sanitizeFilename(lastSeg)
+            }
+        }
+    } catch (e: Exception) {
+        // Fallback simple regex parsing if URI parsing fails
+        val vParamRegex = Regex("""[?&]v=([^&#\s]+)""")
+        val vMatch = vParamRegex.find(url)
+        if (vMatch != null) {
+            return sanitizeFilename(vMatch.groupValues[1])
+        }
+    }
+    return ""
+}
+
+private fun sanitizeFilename(name: String): String {
+    val withUnderscores = name.replace(Regex("""\s+"""), "_")
+    return withUnderscores.replace(Regex("""[^a-zA-Z0-9_-]"""), "")
+}
+

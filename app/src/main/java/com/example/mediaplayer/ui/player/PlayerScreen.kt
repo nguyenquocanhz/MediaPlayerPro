@@ -47,6 +47,10 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.mediaplayer.ui.main.VideoPlaylistItem
@@ -308,6 +312,14 @@ fun PlayerScreen(
     var currentVideoPath by remember { mutableStateOf(videoPath) }
     var currentVideoTitle by remember { mutableStateOf(videoTitle) }
 
+    val isWebViewPlayback = remember(currentVideoPath) {
+        currentVideoPath.contains("upload18.org") || 
+        currentVideoPath.contains("upload18.cc") ||
+        (!currentVideoPath.contains(".m3u8", ignoreCase = true) && 
+         !currentVideoPath.contains(".mp4", ignoreCase = true) && 
+         currentVideoPath.startsWith("http"))
+    }
+
     val configuration = LocalConfiguration.current
     val screenWidth = configuration.screenWidthDp.toFloat()
     val screenHeight = configuration.screenHeightDp.toFloat()
@@ -351,9 +363,31 @@ fun PlayerScreen(
 
     // 2. Initialize ExoPlayer
     val player = remember {
-        ExoPlayer.Builder(context).build().apply {
-            playWhenReady = true
-        }
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                30_000,   // minBufferMs: 30 giây (mặc định 15s)
+                120_000,  // maxBufferMs: 120 giây (mặc định 50s)
+                5_000,    // bufferForPlaybackMs: 5 giây (mặc định 2.5s)
+                10_000    // bufferForPlaybackAfterRebufferMs: 10 giây (mặc định 5s)
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(15_000)
+            .setAllowCrossProtocolRedirects(true)
+
+        ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(httpDataSourceFactory)
+            )
+            .build()
+            .apply {
+                playWhenReady = true
+            }
     }
 
     // Release player on exit
@@ -363,20 +397,38 @@ fun PlayerScreen(
         }
     }
 
+    // Stream error & retry states
+    var streamRetryCount by remember { mutableIntStateOf(0) }
+    var showStreamError by remember { mutableStateOf(false) }
+    var streamErrorMessage by remember { mutableStateOf("") }
+
     LaunchedEffect(currentVideoPath) {
         player.stop()
         player.clearMediaItems()
-        val mediaItem = if (currentVideoPath.contains("m3u8", ignoreCase = true)) {
-            MediaItem.Builder()
-                .setUri(Uri.parse(currentVideoPath))
-                .setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
-                .build()
-        } else {
-            MediaItem.fromUri(Uri.parse(currentVideoPath))
+        showStreamError = false
+        streamRetryCount = 0
+        if (!isWebViewPlayback) {
+            if (currentVideoPath.contains("m3u8", ignoreCase = true)) {
+                val hlsDataSourceFactory = DefaultHttpDataSource.Factory()
+                    .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+                    .setConnectTimeoutMs(15_000)
+                    .setReadTimeoutMs(15_000)
+                    .setAllowCrossProtocolRedirects(true)
+                val hlsMediaSource = HlsMediaSource.Factory(hlsDataSourceFactory)
+                    .setAllowChunklessPreparation(true)
+                    .createMediaSource(
+                        MediaItem.Builder()
+                            .setUri(Uri.parse(currentVideoPath))
+                            .setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
+                            .build()
+                    )
+                player.setMediaSource(hlsMediaSource)
+            } else {
+                player.setMediaItem(MediaItem.fromUri(Uri.parse(currentVideoPath)))
+            }
+            player.prepare()
+            player.play()
         }
-        player.setMediaItem(mediaItem)
-        player.prepare()
-        player.play()
     }
 
     // 3. States for UI Controller
@@ -606,6 +658,7 @@ fun PlayerScreen(
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
+                if (playing) streamRetryCount = 0
                 if (playing && autoNextCountdown != -1) {
                     autoNextCountdown = -1
                 }
@@ -638,11 +691,27 @@ fun PlayerScreen(
                 }
             }
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                android.widget.Toast.makeText(
-                    context,
-                    "Lỗi phát luồng HLS/M3U8: ${error.localizedMessage ?: error.message}",
-                    android.widget.Toast.LENGTH_LONG
-                ).show()
+                val errorCode = error.errorCode
+                // Auto-retry for network/IO errors (max 3 retries)
+                if (errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                    errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+                    errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_UNSPECIFIED ||
+                    errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) {
+                    streamRetryCount++
+                    if (streamRetryCount <= 3) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "Lỗi kết nối, đang thử lại lần $streamRetryCount/3...",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                        player.prepare()
+                        player.play()
+                        return
+                    }
+                }
+                streamRetryCount = 0
+                showStreamError = true
+                streamErrorMessage = "Lỗi phát luồng: ${error.localizedMessage ?: error.message}"
                 isPlaying = false
             }
         }
@@ -690,14 +759,10 @@ fun PlayerScreen(
         }
     }
 
-    // Hide control overlays in Picture-in-Picture mode
-    val finalShowControls = showControls && !isInPipMode
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            // Gesture handling: left half = brightness, right half = volume, horizontal = seek
+    val controllerModifier = if (isWebViewPlayback) {
+        Modifier
+    } else {
+        Modifier
             .pointerInput(isLocked, activePlaylist, currentIndex) {
                 if (isLocked) {
                     detectTapGestures(
@@ -838,7 +903,6 @@ fun PlayerScreen(
                             spawnBubble(offset)
                             val width = size.width
                             if (offset.x < width / 2) {
-                                // Double tap left -> rewind 10s
                                 val target = max(0L, player.currentPosition - 10000L)
                                 player.seekTo(target)
                                 currentPosition = target
@@ -848,7 +912,6 @@ fun PlayerScreen(
                                     showDoubleTapLeft = false
                                 }
                             } else {
-                                // Double tap right -> fast forward 10s
                                 val target = min(player.duration, player.currentPosition + 10000L)
                                 player.seekTo(target)
                                 currentPosition = target
@@ -866,6 +929,16 @@ fun PlayerScreen(
                     )
                 }
             }
+    }
+
+    // Hide control overlays in Picture-in-Picture mode
+    val finalShowControls = showControls && !isInPipMode
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .then(controllerModifier)
     ) {
         // 4. Video Render Surface (Media3 PlayerView with custom aspect ratio constraints)
         val selectedRatio = currentAspectRatioOption.ratio
@@ -895,7 +968,7 @@ fun PlayerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .then(
-                    if (selectedRatio != null) {
+                    if (selectedRatio != null && !isWebViewPlayback) {
                         Modifier.aspectRatio(selectedRatio)
                     } else {
                         Modifier.fillMaxSize()
@@ -903,19 +976,54 @@ fun PlayerScreen(
                 )
                 .align(Alignment.Center)
         ) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        useController = false
-                        this.player = player
-                        this.subtitleView?.let { it.visibility = android.view.View.GONE }
-                    }
-                },
-                update = { playerView ->
-                    playerView.resizeMode = calculatedResizeMode
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+            if (isWebViewPlayback) {
+                AndroidView(
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            layoutParams = android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                databaseEnabled = true
+                                mediaPlaybackRequiresUserGesture = false
+                                useWideViewPort = true
+                                loadWithOverviewMode = true
+                                setSupportZoom(true)
+                                builtInZoomControls = true
+                                displayZoomControls = false
+                                javaScriptCanOpenWindowsAutomatically = true
+                            }
+                            webViewClient = object : android.webkit.WebViewClient() {
+                                override fun shouldOverrideUrlLoading(
+                                    view: android.webkit.WebView?,
+                                    request: android.webkit.WebResourceRequest?
+                                ): Boolean {
+                                    return false
+                                }
+                            }
+                            loadUrl(currentVideoPath)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            useController = false
+                            this.player = player
+                            this.subtitleView?.let { it.visibility = android.view.View.GONE }
+                        }
+                    },
+                    update = { playerView ->
+                        playerView.resizeMode = calculatedResizeMode
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         // Water Bubble Tap Overlay Canvas
@@ -1172,16 +1280,39 @@ fun PlayerScreen(
 
         // 8. Custom Controller Overlay
         AnimatedVisibility(
-            visible = finalShowControls,
+            visible = finalShowControls || isWebViewPlayback,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.5f))
+                    .background(if (isWebViewPlayback) Color.Transparent else Color.Black.copy(alpha = 0.5f))
             ) {
-                if (isLocked) {
+                if (isWebViewPlayback) {
+                    // Floating Top Bar with Back Button & Title only
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.TopCenter)
+                            .background(Color.Black.copy(alpha = 0.6f))
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Quay lại", tint = Color.White)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = currentVideoTitle,
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                } else if (isLocked) {
                     // Lock-only Screen Overlay
                     Box(
                         modifier = Modifier
@@ -2017,6 +2148,63 @@ fun PlayerScreen(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.widthIn(max = 240.dp)
                     )
+                }
+            }
+        }
+    }
+
+    // Stream Error Retry Dialog
+    if (showStreamError) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.85f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A2E))
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = Color(0xFFFF6B6B),
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Text(
+                        text = streamErrorMessage,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { showStreamError = false; onBack() },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                        ) {
+                            Text("Quay lại")
+                        }
+                        Button(
+                            onClick = {
+                                showStreamError = false
+                                streamRetryCount = 0
+                                player.prepare()
+                                player.play()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4ECCA3))
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Thử lại")
+                        }
+                    }
                 }
             }
         }
